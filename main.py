@@ -1,3 +1,4 @@
+from datetime import datetime
 from agent.agent import Agent
 
 from tools.tools import GetUserMemoriesTool
@@ -38,7 +39,7 @@ if __name__ == "__main__":
         CreateUserMemoryTool(),
         UpdateUserMemoryTool(),
         DeleteUserMemoryTool(),
-        MultiXYPlotTool(),
+        # MultiXYPlotTool(),
         ReadFolderContentTool(root_path=os.path.dirname(os.path.abspath(__file__))),
         ReadFileContentTool(root_path=os.path.dirname(os.path.abspath(__file__))),
         WriteFileContentTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=False),
@@ -46,7 +47,7 @@ if __name__ == "__main__":
         RunTerminalCommandsTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=True),
         # CreateWordDocumentTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=False),
         WebSearchTool(),
-        ImageGenerationTool(quality="medium"),
+        # ImageGenerationTool(quality="medium"),
         # Add more tools as needed
     ]
 
@@ -68,10 +69,8 @@ if __name__ == "__main__":
     agent = Agent(
             name=agent_name, 
             tools=selected_tools, 
-            user_id=user_id, 
-            chat_history=chat_history_manager.get_history(),
-            generated_images=chat_history_manager.get_generated_images(),
-            add_timestamp=True
+            user_id=user_id,
+            add_timestamp=False
         )
 
     print(color_text(f"Starting agent '{agent_name}' with user ID '{user_id}'...", '36'))
@@ -83,7 +82,20 @@ if __name__ == "__main__":
         if user_input.lower() == 'exit' or user_input.lower() == 'quit' or user_input.lower() == 'q':
             print(color_text("Exiting...", '31'))
             break
-        stream = agent.run(user_input=user_input)
+
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        user_input = f"> **Timestamp:** `{timestamp}`\nUser's input: {user_input}"
+        
+        user_message = {
+            "role": "user",
+            "content": [{ "type": "input_text", "text": user_input },]
+        }
+        # for img in chat_history_manager.get_generated_images():
+        #     user_message["content"].append(img)
+
+        chat_history_manager.add_entry(user_message)
+
+        stream = agent.run(input_messages=chat_history_manager.get_history())
         # Process the stream of events from the agent
         for event in stream:
             if event["type"] == "response.reasoning_summary_part.added":

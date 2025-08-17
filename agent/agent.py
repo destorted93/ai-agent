@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 
 class Agent:
-    def __init__(self, name, tools, user_id=None, chat_history=[], generated_images=[], add_timestamp=False):
+    def __init__(self, name, tools, user_id=None, add_timestamp=False):
         self.name = name
         self.tools = tools
         self.user_id = user_id
@@ -17,27 +17,26 @@ class Agent:
         self.token_usage_history = {}
         self.function_call_detected = False
         self.iteration = 1
-        self.chat_history = chat_history
+        # Avoid mutable default args
         self.chat_history_during_run = []
-        self.generated_images = generated_images
+        self.generated_images = []
 
         # throw an error if user_id is None or empty
         if not self.user_id or not isinstance(self.user_id, str):
             raise ValueError("user_id must be a non-empty string.")
 
-        print(self.color_text(f"\n{'='*50}\nWelcome to your virtual assistant '{self.name}'!\n{'='*50}", '36'))
-
     def color_text(self, text, color_code):
         # Windows PowerShell supports ANSI escape codes in recent versions
         return f"\033[{color_code}m{text}\033[0m"
 
-    def run(self, user_input=None):
+    def run(self, input_messages=None, max_turns=16, run_overrides=None):
         self.chat_history_during_run = []
         self.function_call_detected = False
         self.iteration = 1
+        run_overrides = run_overrides or {}
 
-        # if user_input None or is not string or is empty, return None
-        if user_input is None or not isinstance(user_input, str) or not user_input.strip():
+        # if messages None or is not string or is empty, return None
+        if input_messages is None:
             yield{
                 "type": "response.agent.done",
                 "message": "No user input provided or input is invalid.",
@@ -48,161 +47,185 @@ class Agent:
 
         # start the Agent loop
         while True:
-            # if user_input is None and no function call was detected in the previous iteration, break the agent loop
-            if user_input is None and not self.function_call_detected:
+            # Guard against runaway loops (SDK would raise MaxTurnsExceeded)
+            if self.iteration > max_turns:
                 yield {
                     "type": "response.agent.done",
-                    "message": "Agent run completed without further user input.",
+                    "message": f"Max turns exceeded (max_turns={max_turns}).",
                     "chat_history": self.chat_history_during_run,
                     "generated_images": self.generated_images
                 }
                 return
-
-            # if user_input is not None and no function call was detected, it means we are in the first iteration or the user provided new input
-            if user_input and not self.function_call_detected:
-                # if self.add_timestamp is True, append a timestamp to the user input in markdown format
-                if self.add_timestamp:
-                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    user_input = f"> **Timestamp:** `{timestamp}`\nUser's input: {user_input}"
-                # Append user input to chat history
-
-                user_message = {
-                    "role": "user",
-                    "content": [{ "type": "input_text", "text": user_input },]
+            # if this is not the first iteration and no function call was detected, break the agent loop
+            if self.iteration > 1 and not self.function_call_detected:
+                yield {
+                    "type": "response.agent.done",
+                    "message": "Agent run completed without further user input or function calls.",
+                    "chat_history": self.chat_history_during_run,
+                    "generated_images": self.generated_images
                 }
-                if self.generated_images:
-                    for img in self.generated_images:
-                        user_message["content"].append(img)
-                self.chat_history.append(user_message)
-
-                # set user_input to None to avoid reusing it in the next iteration
-                user_input = None
+                return
+            elif self.iteration == 1:
+                self.chat_history_during_run = []
 
             # clear the function call detection flag for the next iteration
             self.function_call_detected = False
-            self.chat_history_during_run = []
 
-            stream = self.client.responses.create(
-                model=MODEL_NAME,
-                instructions=self.instructions,
-                input=self.chat_history,
-                prompt_cache_key=self.user_id,
-                store=STORE,
-                stream=STREAM,
-                reasoning=REASONING,
-                text=VERBOSITY,
-                temperature=TEMPERATURE,
-                tool_choice=TOOL_CHOICE,
-                tools=self.tool_schemas
-            )
+            # Allow simple per-run overrides while keeping defaults from config
+            model = run_overrides.get("model", MODEL_NAME)
+            store = run_overrides.get("store", STORE)
+            stream = run_overrides.get("stream", STREAM)
+            reasoning = run_overrides.get("reasoning", REASONING)
+            temperature = run_overrides.get("temperature", TEMPERATURE)
+            tool_choice = run_overrides.get("tool_choice", TOOL_CHOICE)
+            prompt_cache_key = run_overrides.get("prompt_cache_key", self.user_id)
+            verbosity = run_overrides.get("text", VERBOSITY)
 
-            for event in stream:
-                if event.type == "response.reasoning_summary_part.added":
-                    yield {"type": "response.reasoning_summary_part.added"}
-                elif event.type == "response.reasoning_summary_text.delta":
-                    yield {"type": "response.reasoning_summary_text.delta", "delta": event.delta}
-                elif event.type == "response.reasoning_summary_text.done":
-                    yield {"type": "response.reasoning_summary_text.done", "text": event.text}
-                elif event.type == "response.content_part.added":
-                    yield {"type": "response.content_part.added"}
-                elif event.type == "response.output_text.delta":
-                    yield {"type": "response.output_text.delta", "delta": event.delta}
-                elif event.type == "response.output_text.done":
-                    yield {"type": "response.output_text.done", "text": event.text}
-                elif event.type == "response.output_item.done":
-                    if event.item.type in ["function_call", "custom_tool_call"]:
-                        yield {"type": "response.output_item.done", "item": event.item}
-                elif event.type == "response.image_generation_call.generating":
-                    yield {"type": "response.image_generation_call.generating"}
+            # wrap the request in try except
+            try:
+                stream = self.client.responses.create(
+                    model=model,
+                    instructions=self.instructions,
+                    input=input_messages + self.chat_history_during_run,
+                    prompt_cache_key=prompt_cache_key,
+                    store=store,
+                    stream=stream,
+                    reasoning=reasoning,
+                    text=verbosity,
+                    temperature=temperature,
+                    tool_choice=tool_choice,
+                    tools=self.tool_schemas
+                )
+                for event in stream:
+                    if event.type == "response.reasoning_summary_part.added":
+                        yield {"type": "response.reasoning_summary_part.added"}
+                    elif event.type == "response.reasoning_summary_text.delta":
+                        yield {"type": "response.reasoning_summary_text.delta", "delta": event.delta}
+                    elif event.type == "response.reasoning_summary_text.done":
+                        yield {"type": "response.reasoning_summary_text.done", "text": event.text}
+                    elif event.type == "response.content_part.added":
+                        yield {"type": "response.content_part.added"}
+                    elif event.type == "response.output_text.delta":
+                        yield {"type": "response.output_text.delta", "delta": event.delta}
+                    elif event.type == "response.output_text.done":
+                        yield {"type": "response.output_text.done", "text": event.text}
+                    elif event.type == "response.output_item.done":
+                        if event.item.type in ["function_call", "custom_tool_call"]:
+                            yield {"type": "response.output_item.done", "item": event.item}
+                    elif event.type == "response.image_generation_call.generating":
+                        yield {"type": "response.image_generation_call.generating"}
 
-                elif event.type == "response.image_generation_call.partial_image":
-                    yield {"type": "response.image_generation_call.partial_image", "data": event}
+                    elif event.type == "response.image_generation_call.partial_image":
+                        yield {"type": "response.image_generation_call.partial_image", "data": event}
 
-                elif event.type == "response.image_generation_call.completed":
-                    yield {"type": "response.image_generation_call.completed", "data": event}
+                    elif event.type == "response.image_generation_call.completed":
+                        yield {"type": "response.image_generation_call.completed", "data": event}
 
-                elif event.type == "response.completed":
-                    with open(os.path.join("events_logs", f"event_{self.iteration}.json"), "w") as f:
-                        json.dump(make_serializable(event), f, indent=4)
+                    elif event.type == "response.completed":
+                        with open(os.path.join("events_logs", f"event_{self.iteration}.json"), "w") as f:
+                            json.dump(make_serializable(event), f, indent=4)
 
-                    # Collect token usage for this iteration
-                    self.token_usage = {
-                        "iteration": self.iteration,
-                        "input_tokens": event.response.usage.input_tokens,
-                        "cached_tokens": event.response.usage.input_tokens_details.cached_tokens,
-                        "output_tokens": event.response.usage.output_tokens,
-                        "reasoning_tokens": event.response.usage.output_tokens_details.reasoning_tokens,
-                        "total_tokens": event.response.usage.total_tokens
-                    }
-                    # Retain token usage for this iteration
-                    self.token_usage_history[self.iteration] = self.token_usage
+                        # Collect token usage for this iteration
+                        self.token_usage = {
+                            "iteration": self.iteration,
+                            "input_tokens": event.response.usage.input_tokens,
+                            "cached_tokens": event.response.usage.input_tokens_details.cached_tokens,
+                            "output_tokens": event.response.usage.output_tokens,
+                            "reasoning_tokens": event.response.usage.output_tokens_details.reasoning_tokens,
+                            "total_tokens": event.response.usage.total_tokens
+                        }
+                        # Retain token usage for this iteration
+                        self.token_usage_history[self.iteration] = self.token_usage
 
-                    # Append the AI agent output items to the chat history
-                    for output_item in event.response.output:
-                        # Check if the output item is a function call
-                        if output_item.type == "function_call":
-                            # Check if a function call was detected
-                            self.function_call_detected = True
+                        # Append the AI agent output items to the chat history
+                        for output_item in event.response.output:
+                            # Check if the output item is a function call
+                            if output_item.type == "function_call":
+                                # Check if a function call was detected
+                                self.function_call_detected = True
 
-                            # Get the function call details
-                            function_call = output_item
-                            function_call_id = function_call.call_id
-                            function_call_arguments = json.loads(function_call.arguments)
-                            function_call_name = function_call.name
-                            function_call_result = None
+                                # Get the function call details
+                                function_call = output_item
+                                function_call_id = function_call.call_id
+                                function_call_arguments = json.loads(function_call.arguments)
+                                function_call_name = function_call.name
+                                function_call_result = None
 
-                            try:
-                                # Find and run the correct tool
-                                for tool in self.tools:
-                                    if tool.schema["name"] == function_call_name:
-                                        function_call_result = tool.run(**function_call_arguments)
-                                        break
-                            except Exception as e:
-                                function_call_result = {"type": "error", "message": f"Error occurred while calling function {function_call_name}: {e}"}
+                                try:
+                                    # Find and run the correct tool
+                                    for tool in self.tools:
+                                        if tool.schema["name"] == function_call_name:
+                                            function_call_result = tool.run(**function_call_arguments)
+                                            break
+                                except Exception as e:
+                                    function_call_result = {"type": "error", "message": f"Error occurred while calling function {function_call_name}: {e}"}
 
-                            # Append the function call and its result to the chat history
-                            self.chat_history_during_run.append(make_serializable(function_call))
-                            self.chat_history_during_run.append({
-                                "type": "function_call_output",
-                                "call_id": function_call_id,
-                                "output": json.dumps(function_call_result),
-                            })
+                                # Append the function call and its result to the chat history
+                                self.chat_history_during_run.append(make_serializable(function_call))
+                                self.chat_history_during_run.append({
+                                    "type": "function_call_output",
+                                    "call_id": function_call_id,
+                                    "output": json.dumps(function_call_result),
+                                })
 
-                        elif output_item.type == "custom_tool_call":
-                            # Append the custom tool call output item to the chat history
-                            # self.chat_history_during_run.append(output_item)
-                            pass
+                            elif output_item.type == "custom_tool_call":
+                                # Append the custom tool call output item to the chat history
+                                # self.chat_history_during_run.append(output_item)
+                                pass
 
-                        elif output_item.type == "reasoning":
-                            # Append the reasoning output item to the chat history
-                            # self.chat_history_during_run.append(output_item)
-                            pass
+                            elif output_item.type == "reasoning":
+                                # Append the reasoning output item to the chat history
+                                # self.chat_history_during_run.append(output_item)
+                                pass
 
-                        elif output_item.type == "message":
-                            # Append the assistant message output item to the chat history
-                            self.chat_history_during_run.append(make_serializable(output_item))
+                            elif output_item.type == "message":
+                                # Append the assistant message output item to the chat history
+                                self.chat_history_during_run.append(make_serializable(output_item))
 
-                        elif output_item.type == "image_generation_call":
-                            # Handle image generation call output item
-                            base64_image = output_item.result
-                            self.generated_images.append({
-                                "type": "input_image",
-                                "image_url": f"data:image/png;base64,{base64_image}",
-                            })
+                            elif output_item.type == "image_generation_call":
+                                # Handle image generation call output item
+                                base64_image = output_item.result
+                                self.generated_images.append({
+                                    "type": "input_image",
+                                    "image_url": f"data:image/png;base64,{base64_image}",
+                                })
 
-                    yield {"type": "response.completed", "usage": self.token_usage}
+                        yield {"type": "response.completed", "usage": self.token_usage}
 
-                else:
-                    # Handle other event types if necessary
-                    pass
-        
-            if self.chat_history_during_run:
-                # Append the chat history during this run to the main chat history
-                self.chat_history += self.chat_history_during_run
-                # Reset the chat history for the next iteration
-                self.chat_history_during_run = []
+                    elif output_item.type == "error":
+                        # Handle error output item
+                        assistant_message_with_error = {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": f"An error occurred: {output_item.message}",
+                                }
+                            ]
+                        }
+                        self.chat_history_during_run.append(make_serializable(assistant_message_with_error))
 
-            user_input = None
+            except Exception as e:
+                # Handle error output item
+                assistant_message_with_error = {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": f"An error occurred: {str(e)}",
+                        }
+                    ]
+                }
+                self.chat_history_during_run.append(make_serializable(assistant_message_with_error))
+
+                yield {
+                    "type": "response.agent.done",
+                    "message": f"An error occurred during agent run: {str(e)}",
+                    "chat_history": self.chat_history_during_run,
+                    "generated_images": self.generated_images
+                }
+                return 
+
             self.iteration += 1
 
 def make_serializable(obj):
