@@ -95,7 +95,18 @@ if __name__ == "__main__":
 
         chat_history_manager.add_entry(user_message)
 
-        stream = agent.run(input_messages=chat_history_manager.get_history())
+        run_overrides = {
+            "model": "gpt-5",
+            "reasoning": {
+                "effort": "low",
+                "summary": "auto"
+            },
+            "verbosity": {
+                "verbosity": "medium"
+            }
+        }
+
+        stream = agent.run(input_messages=chat_history_manager.get_history(), max_turns=32, run_overrides=run_overrides)
         # Process the stream of events from the agent
         for event in stream:
             if event["type"] == "response.reasoning_summary_part.added":

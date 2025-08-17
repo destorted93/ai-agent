@@ -83,6 +83,11 @@ class Agent:
 
             # wrap the request in try except
             try:
+                # exclude text and reasoning if a model's name does not start with "gpt-5"
+                if not model.startswith("gpt-5"):
+                    reasoning = None
+                    verbosity = None
+                
                 stream = self.client.responses.create(
                     model=model,
                     instructions=self.instructions,
@@ -192,14 +197,14 @@ class Agent:
 
                         yield {"type": "response.completed", "usage": self.token_usage}
 
-                    elif output_item.type == "error":
+                    elif event.type == "error":
                         # Handle error output item
                         assistant_message_with_error = {
                             "role": "assistant",
                             "content": [
                                 {
                                     "type": "output_text",
-                                    "text": f"An error occurred: {output_item.message}",
+                                    "text": f"An error occurred: {event.message}",
                                 }
                             ]
                         }
