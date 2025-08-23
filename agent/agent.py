@@ -1,6 +1,6 @@
 import os
 from openai import OpenAI
-from agent.config import MODEL_NAME, TEMPERATURE, REASONING, STORE, STREAM, TOOL_CHOICE, VERBOSITY, get_system_prompt
+from agent.config import MODEL_NAME, TEMPERATURE, REASONING, STORE, STREAM, TOOL_CHOICE, VERBOSITY, INCLUDE, get_system_prompt
 import json
 from datetime import datetime
 
@@ -29,17 +29,20 @@ class Agent:
         # Windows PowerShell supports ANSI escape codes in recent versions
         return f"\033[{color_code}m{text}\033[0m"
 
-    def run(self, input_messages=None, max_turns=16, run_overrides=None):
+    def run(self, input_messages=None, max_turns=16, run_overrides=None, include_reasoning=False):
         self.chat_history_during_run = []
+        self.run_overrides = run_overrides or {}
+        self.include_reasoning = include_reasoning or False
         self.function_call_detected = False
         self.iteration = 1
-        run_overrides = run_overrides or {}
+        self._run_start_time = datetime.now()
 
         # if messages None or is not string or is empty, return None
         if input_messages is None:
             yield{
                 "type": "response.agent.done",
                 "message": "No user input provided or input is invalid.",
+                "duration_seconds": (datetime.now() - self._run_start_time).total_seconds(),
                 "chat_history": self.chat_history_during_run,
                 "generated_images": self.generated_images
             }
@@ -52,6 +55,7 @@ class Agent:
                 yield {
                     "type": "response.agent.done",
                     "message": f"Max turns exceeded (max_turns={max_turns}).",
+                    "duration_seconds": (datetime.now() - self._run_start_time).total_seconds(),
                     "chat_history": self.chat_history_during_run,
                     "generated_images": self.generated_images
                 }
@@ -61,6 +65,7 @@ class Agent:
                 yield {
                     "type": "response.agent.done",
                     "message": "Agent run completed without further user input or function calls.",
+                    "duration_seconds": (datetime.now() - self._run_start_time).total_seconds(),
                     "chat_history": self.chat_history_during_run,
                     "generated_images": self.generated_images
                 }
@@ -72,14 +77,15 @@ class Agent:
             self.function_call_detected = False
 
             # Allow simple per-run overrides while keeping defaults from config
-            model = run_overrides.get("model", MODEL_NAME)
-            store = run_overrides.get("store", STORE)
-            stream = run_overrides.get("stream", STREAM)
-            reasoning = run_overrides.get("reasoning", REASONING)
-            temperature = run_overrides.get("temperature", TEMPERATURE)
-            tool_choice = run_overrides.get("tool_choice", TOOL_CHOICE)
-            prompt_cache_key = run_overrides.get("prompt_cache_key", self.user_id)
-            verbosity = run_overrides.get("text", VERBOSITY)
+            model = self.run_overrides.get("model", MODEL_NAME)
+            store = self.run_overrides.get("store", STORE)
+            stream = self.run_overrides.get("stream", STREAM)
+            reasoning = self.run_overrides.get("reasoning", REASONING)
+            temperature = self.run_overrides.get("temperature", TEMPERATURE)
+            tool_choice = self.run_overrides.get("tool_choice", TOOL_CHOICE)
+            prompt_cache_key = self.run_overrides.get("prompt_cache_key", self.user_id)
+            verbosity = self.run_overrides.get("text", VERBOSITY)
+            include = self.run_overrides.get("include", INCLUDE)
 
             # wrap the request in try except
             try:
@@ -99,7 +105,8 @@ class Agent:
                     text=verbosity,
                     temperature=temperature,
                     tool_choice=tool_choice,
-                    tools=self.tool_schemas
+                    tools=self.tool_schemas,
+                    include=include
                 )
                 for event in stream:
                     if event.type == "response.reasoning_summary_part.added":
@@ -180,7 +187,10 @@ class Agent:
 
                             elif output_item.type == "reasoning":
                                 # Append the reasoning output item to the chat history
-                                # self.chat_history_during_run.append(output_item)
+                                final_item = make_serializable(output_item)
+                                # remove status from final_item
+                                final_item.pop("status", None)
+                                self.chat_history_during_run.append(make_serializable(final_item))
                                 pass
 
                             elif output_item.type == "message":
@@ -226,6 +236,7 @@ class Agent:
                 yield {
                     "type": "response.agent.done",
                     "message": f"An error occurred during agent run: {str(e)}",
+                    "duration_seconds": (datetime.now() - self._run_start_time).total_seconds(),
                     "chat_history": self.chat_history_during_run,
                     "generated_images": self.generated_images
                 }

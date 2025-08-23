@@ -1,7 +1,7 @@
 # Rooted ignores for app data
 /images/
 /events_logs/
-/chat_history/chat_history.json
+/chat_history/chat_history*.json
 /chat_history/generated_images.json
 
 # Python bytecode and caches

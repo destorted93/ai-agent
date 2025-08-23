@@ -12,6 +12,7 @@ VERBOSITY = {
 STORE = False
 STREAM = True
 TOOL_CHOICE = "auto"
+INCLUDE = ["reasoning.encrypted_content"]
 
 def get_system_prompt(agent_name):
      return f"""

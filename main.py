@@ -44,9 +44,9 @@ if __name__ == "__main__":
         ReadFileContentTool(root_path=os.path.dirname(os.path.abspath(__file__))),
         WriteFileContentTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=False),
         CreateFolderTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=False),
-        RunTerminalCommandsTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=True),
+        # RunTerminalCommandsTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=True),
         # CreateWordDocumentTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=False),
-        WebSearchTool(),
+        # WebSearchTool(),
         # ImageGenerationTool(quality="medium"),
         # Add more tools as needed
     ]
@@ -97,16 +97,27 @@ if __name__ == "__main__":
 
         run_overrides = {
             "model": "gpt-5",
+            "store": False,
             "reasoning": {
-                "effort": "low",
-                "summary": "auto"
+                "effort": "medium",
+                # "summary": "auto"
             },
             "verbosity": {
                 "verbosity": "medium"
             }
         }
+        max_turns = 256
+        include_reasoning = True
 
-        stream = agent.run(input_messages=chat_history_manager.get_history(), max_turns=32, run_overrides=run_overrides)
+        # Start the agent run
+        stream = agent.run(
+            input_messages=chat_history_manager.get_history(), 
+            max_turns=max_turns, 
+            run_overrides=run_overrides,
+            include_reasoning=include_reasoning
+            )
+
+
         # Process the stream of events from the agent
         for event in stream:
             if event["type"] == "response.reasoning_summary_part.added":
@@ -158,7 +169,7 @@ if __name__ == "__main__":
                     partial_images[item_id][sequence_number].save(image_path, format="PNG")
                     print(color_text(f"Completed image saved to {image_path}", '32'), flush=True)
             elif event["type"] == "response.agent.done":
-                print(color_text("\n[Agent Done]", '32'), event.get("message", ""), flush=True)
+                print(color_text("\n[Agent Done]", '32'), event.get("message", ""), f" (duration: {event.get('duration_seconds', 0)} seconds)", flush=True)
                 chat_history_manager.append_entries(event["chat_history"])
                 chat_history_manager.save_history()
 
