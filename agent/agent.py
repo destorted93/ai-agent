@@ -93,6 +93,7 @@ class Agent:
                 if not model.startswith("gpt-5"):
                     reasoning = None
                     verbosity = None
+                    include = []
                 
                 stream = self.client.responses.create(
                     model=model,

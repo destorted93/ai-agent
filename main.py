@@ -46,7 +46,7 @@ if __name__ == "__main__":
         CreateFolderTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=False),
         # RunTerminalCommandsTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=True),
         # CreateWordDocumentTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=False),
-        # WebSearchTool(),
+        WebSearchTool(),
         # ImageGenerationTool(quality="medium"),
         # Add more tools as needed
     ]
