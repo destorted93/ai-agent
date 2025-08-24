@@ -1,27 +1,36 @@
 import os
-from openai import OpenAI
-from agent.config import MODEL_NAME, TEMPERATURE, REASONING, STORE, STREAM, TOOL_CHOICE, VERBOSITY, INCLUDE, get_system_prompt
 import json
 from datetime import datetime
+from openai import OpenAI
+from .config import AgentConfig
 
 class Agent:
-    def __init__(self, name, tools, user_id=None, add_timestamp=False):
+    def __init__(self, name, tools, user_id=None, add_timestamp=False, config: AgentConfig | None = None):
+        """AI Agent wrapper.
+
+        Parameters:
+            name: Agent display/name identifier.
+            tools: Iterable of tool objects exposing a 'schema' attribute and 'run' method.
+            user_id: Required unique user identifier (used for caching, etc.).
+            add_timestamp: (reserved) whether to add timestamps to messages.
+            config: Optional AgentConfig instance. If omitted, a default AgentConfig() is created.
+        """
         self.name = name
         self.tools = tools
         self.user_id = user_id
         self.add_timestamp = add_timestamp
+        self.config = config or AgentConfig()
         self.client = OpenAI()
-        self.instructions = get_system_prompt(self.name)
+        # Use config's system prompt (supports custom template modifications)
+        self.instructions = self.config.get_system_prompt(self.name)
         self.tool_schemas = [tool.schema for tool in self.tools]
         self.token_usage = {}
         self.token_usage_history = {}
         self.function_call_detected = False
         self.iteration = 1
-        # Avoid mutable default args
-        self.chat_history_during_run = []
+        self.chat_history_during_run = []  # per-run ephemeral history additions
         self.generated_images = []
 
-        # throw an error if user_id is None or empty
         if not self.user_id or not isinstance(self.user_id, str):
             raise ValueError("user_id must be a non-empty string.")
 
@@ -29,10 +38,8 @@ class Agent:
         # Windows PowerShell supports ANSI escape codes in recent versions
         return f"\033[{color_code}m{text}\033[0m"
 
-    def run(self, input_messages=None, max_turns=16, run_overrides=None, include_reasoning=False):
+    def run(self, input_messages=None, max_turns=16):
         self.chat_history_during_run = []
-        self.run_overrides = run_overrides or {}
-        self.include_reasoning = include_reasoning or False
         self.function_call_detected = False
         self.iteration = 1
         self._run_start_time = datetime.now()
@@ -76,23 +83,23 @@ class Agent:
             # clear the function call detection flag for the next iteration
             self.function_call_detected = False
 
-            # Allow simple per-run overrides while keeping defaults from config
-            model = self.run_overrides.get("model", MODEL_NAME)
-            store = self.run_overrides.get("store", STORE)
-            stream = self.run_overrides.get("stream", STREAM)
-            reasoning = self.run_overrides.get("reasoning", REASONING)
-            temperature = self.run_overrides.get("temperature", TEMPERATURE)
-            tool_choice = self.run_overrides.get("tool_choice", TOOL_CHOICE)
-            prompt_cache_key = self.run_overrides.get("prompt_cache_key", self.user_id)
-            verbosity = self.run_overrides.get("text", VERBOSITY)
-            include = self.run_overrides.get("include", INCLUDE)
+            # Effective settings come straight from the config object
+            model = self.config.model_name
+            temperature = self.config.temperature
+            reasoning = self.config.reasoning
+            text = self.config.text
+            store = self.config.store
+            stream = self.config.stream
+            tool_choice = self.config.tool_choice
+            include = self.config.include
+            prompt_cache_key = self.user_id
 
             # wrap the request in try except
             try:
                 # exclude text and reasoning if a model's name does not start with "gpt-5"
                 if not model.startswith("gpt-5"):
                     reasoning = None
-                    verbosity = None
+                    text = None
                     include = []
                 
                 stream = self.client.responses.create(
@@ -103,7 +110,7 @@ class Agent:
                     store=store,
                     stream=stream,
                     reasoning=reasoning,
-                    text=verbosity,
+                    text=text,
                     temperature=temperature,
                     tool_choice=tool_choice,
                     tools=self.tool_schemas,
@@ -135,9 +142,6 @@ class Agent:
                         yield {"type": "response.image_generation_call.completed", "data": event}
 
                     elif event.type == "response.completed":
-                        with open(os.path.join("events_logs", f"event_{self.iteration}.json"), "w") as f:
-                            json.dump(make_serializable(event), f, indent=4)
-
                         # Collect token usage for this iteration
                         self.token_usage = {
                             "iteration": self.iteration,

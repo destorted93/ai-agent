@@ -1,21 +1,23 @@
 from datetime import datetime
-from agent.agent import Agent
+from agent import Agent, AgentConfig
 
-from tools.tools import GetUserMemoriesTool
-from tools.tools import CreateUserMemoryTool
-from tools.tools import UpdateUserMemoryTool
-from tools.tools import DeleteUserMemoryTool
-from tools.tools import ReadFolderContentTool
-from tools.tools import ReadFileContentTool
-from tools.tools import WriteFileContentTool
-from tools.tools import CreateFolderTool
-from tools.tools import CreateWordDocumentTool
-from tools.tools import RunTerminalCommandsTool
-from tools.tools import MultiXYPlotTool
-from tools.tools import WebSearchTool
-from tools.tools import ImageGenerationTool
+from tools import (
+    GetUserMemoriesTool,
+    CreateUserMemoryTool,
+    UpdateUserMemoryTool,
+    DeleteUserMemoryTool,
+    ReadFolderContentTool,
+    ReadFileContentTool,
+    WriteFileContentTool,
+    CreateFolderTool,
+    CreateWordDocumentTool,
+    RunTerminalCommandsTool,
+    MultiXYPlotTool,
+    WebSearchTool,
+    ImageGenerationTool,
+)
 
-from chat_history.chat_history import ChatHistoryManager
+from chat_history import ChatHistoryManager
 
 import os
 import base64
@@ -46,7 +48,7 @@ if __name__ == "__main__":
         CreateFolderTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=False),
         # RunTerminalCommandsTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=True),
         # CreateWordDocumentTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=False),
-        WebSearchTool(),
+        # WebSearchTool(),
         # ImageGenerationTool(quality="medium"),
         # Add more tools as needed
     ]
@@ -66,12 +68,25 @@ if __name__ == "__main__":
             print(color_text("Please enter 'y' or 'n'.", '31'))
 
     # Initialize the agent with the selected tools and chat history
+    # Define configuration explicitly
+    config = AgentConfig(
+        model_name="gpt-5",
+        temperature=1.0,
+        reasoning={"effort": "low", "summary": "auto"},
+        text={"verbosity": "medium"},
+        store=False,
+        stream=True,
+        tool_choice="auto",
+        include=["reasoning.encrypted_content"],
+    )
+
     agent = Agent(
-            name=agent_name, 
-            tools=selected_tools, 
-            user_id=user_id,
-            add_timestamp=False
-        )
+        name=agent_name,
+        tools=selected_tools,
+        user_id=user_id,
+        add_timestamp=False,
+        config=config,
+    )
 
     print(color_text(f"Starting agent '{agent_name}' with user ID '{user_id}'...", '36'))
 
@@ -95,27 +110,13 @@ if __name__ == "__main__":
 
         chat_history_manager.add_entry(user_message)
 
-        run_overrides = {
-            "model": "gpt-5",
-            "store": False,
-            "reasoning": {
-                "effort": "medium",
-                # "summary": "auto"
-            },
-            "verbosity": {
-                "verbosity": "medium"
-            }
-        }
         max_turns = 256
-        include_reasoning = True
 
         # Start the agent run
         stream = agent.run(
-            input_messages=chat_history_manager.get_history(), 
-            max_turns=max_turns, 
-            run_overrides=run_overrides,
-            include_reasoning=include_reasoning
-            )
+            input_messages=chat_history_manager.get_history(),
+            max_turns=max_turns,
+        )
 
 
         # Process the stream of events from the agent
