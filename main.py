@@ -6,6 +6,10 @@ from tools import (
     CreateUserMemoryTool,
     UpdateUserMemoryTool,
     DeleteUserMemoryTool,
+    GetPlansTool,
+    CreatePlanTool,
+    UpdatePlanTool,
+    DeletePlanTool,
     ReadFolderContentTool,
     ReadFileContentTool,
     WriteFileContentTool,
@@ -41,6 +45,10 @@ if __name__ == "__main__":
         CreateUserMemoryTool(),
         UpdateUserMemoryTool(),
         DeleteUserMemoryTool(),
+        GetPlansTool(),
+        CreatePlanTool(),
+        UpdatePlanTool(),
+        DeletePlanTool(),
         # MultiXYPlotTool(),
         ReadFolderContentTool(root_path=os.path.dirname(os.path.abspath(__file__))),
         ReadFileContentTool(root_path=os.path.dirname(os.path.abspath(__file__))),
@@ -70,9 +78,9 @@ if __name__ == "__main__":
     # Initialize the agent with the selected tools and chat history
     # Define configuration explicitly
     config = AgentConfig(
-        model_name="gpt-5",
+        model_name="gpt-5-mini",
         temperature=1.0,
-        reasoning={"effort": "low", "summary": "auto"},
+        reasoning={"effort": "high", "summary": "auto"},
         text={"verbosity": "medium"},
         store=False,
         stream=True,

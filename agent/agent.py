@@ -102,7 +102,7 @@ class Agent:
                     text = None
                     include = []
                 
-                stream = self.client.responses.create(
+                events = self.client.responses.create(
                     model=model,
                     instructions=self.instructions,
                     input=input_messages + self.chat_history_during_run,
@@ -116,7 +116,7 @@ class Agent:
                     tools=self.tool_schemas,
                     include=include
                 )
-                for event in stream:
+                for event in events:
                     if event.type == "response.reasoning_summary_part.added":
                         yield {"type": "response.reasoning_summary_part.added"}
                     elif event.type == "response.reasoning_summary_text.delta":
