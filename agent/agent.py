@@ -5,20 +5,18 @@ from openai import OpenAI
 from .config import AgentConfig
 
 class Agent:
-    def __init__(self, name, tools, user_id=None, add_timestamp=False, config: AgentConfig | None = None):
+    def __init__(self, name, tools, user_id=None, config: AgentConfig | None = None):
         """AI Agent wrapper.
 
         Parameters:
             name: Agent display/name identifier.
             tools: Iterable of tool objects exposing a 'schema' attribute and 'run' method.
             user_id: Required unique user identifier (used for caching, etc.).
-            add_timestamp: (reserved) whether to add timestamps to messages.
             config: Optional AgentConfig instance. If omitted, a default AgentConfig() is created.
         """
         self.name = name
         self.tools = tools
         self.user_id = user_id
-        self.add_timestamp = add_timestamp
         self.config = config or AgentConfig()
         self.client = OpenAI()
         # Use config's system prompt (supports custom template modifications)
@@ -114,7 +112,8 @@ class Agent:
                     temperature=temperature,
                     tool_choice=tool_choice,
                     tools=self.tool_schemas,
-                    include=include
+                    include=include,
+                    # service_tier="priority"
                 )
                 for event in events:
                     if event.type == "response.reasoning_summary_part.added":

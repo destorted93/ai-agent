@@ -78,9 +78,9 @@ if __name__ == "__main__":
     # Initialize the agent with the selected tools and chat history
     # Define configuration explicitly
     config = AgentConfig(
-        model_name="gpt-5-mini",
+        model_name="gpt-5",
         temperature=1.0,
-        reasoning={"effort": "high", "summary": "auto"},
+        reasoning={"effort": "low", "summary": "auto"},
         text={"verbosity": "medium"},
         store=False,
         stream=True,
@@ -92,7 +92,6 @@ if __name__ == "__main__":
         name=agent_name,
         tools=selected_tools,
         user_id=user_id,
-        add_timestamp=False,
         config=config,
     )
 

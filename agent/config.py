@@ -57,6 +57,8 @@ _LEGACY_PROMPT_TEMPLATE = (
   "Clarifications & Defaults:\n"
   "- Offer concise choice sets (A/B) for divergent strategies.\n"
   "- If a detail is missing but low risk, choose a sensible default, state it explicitly.\n\n"
+  "Empty Input Handling:\n"
+  "- If the user's message is exactly empty ('' after trimming whitespace), respond with an empty string '' and nothing else (no spaces, no punctuation, no explanations). This rule is absolute.\n\n"
   "Output Style & Verbosity:\n"
   "- Bullets, short paragraphs, labeled sections when useful.\n"
   "- Verbosity levels: brief (default) / balanced / detailed — adjust on request.\n"
