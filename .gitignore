@@ -3,6 +3,7 @@
 /events_logs/
 /chat_history/chat_history*.json
 /chat_history/generated_images.json
+/memory/memories*.json
 /sandbox/
 
 # Python bytecode and caches
