@@ -7,6 +7,14 @@ MEMORY_FILE = os.path.join(os.path.dirname(__file__), 'memories.json')
 class MemoryManager:
     def __init__(self, file_path=MEMORY_FILE):
         self.file_path = file_path
+        # Ensure the memories file exists on initialization
+        if not os.path.exists(self.file_path):
+            try:
+                with open(self.file_path, 'w', encoding='utf-8') as f:
+                    json.dump([], f, ensure_ascii=False, indent=2)
+            except Exception:
+                # If file creation fails, proceed; load_memories will handle gracefully
+                pass
         self.memories = self.load_memories()
 
     def load_memories(self):
