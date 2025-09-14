@@ -233,3 +233,25 @@ class DeleteTodoTool:
         todo_manager = TodoManager()
         results = todo_manager.delete_todos(ids)
         return results
+
+
+class ClearTodosTool:
+    schema = {
+        "type": "function",
+        "name": "clear_todos",
+        "description": (
+            "Delete all to-do items. Use when switching to a new, unrelated task or when resetting planning."
+        ),
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        },
+    }
+
+    def run(self, **kwargs):
+        todo_manager = TodoManager()
+        result = todo_manager.clear_todos()
+        return result

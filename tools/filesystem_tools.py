@@ -1,6 +1,7 @@
 import os
 import re
 import shutil
+import hashlib
 
 # -----------------
 # Helper functions
@@ -98,6 +99,66 @@ def _offset_from_line_col(index, line: int, column: int):
     return line_info['start'] + (column - 1)
 
 
+def _line_col_from_offset(index, offset: int):
+    """
+    Convert a 0-based absolute offset to 1-based (line, column).
+    Column counts characters within the line content only (excluding EOL).
+    """
+    if offset < 0 or offset > index['total_length']:
+        raise ValueError('Offset out of range')
+    lines = index['lines']
+    if not lines:
+        return 1, 1
+    lo, hi = 0, len(lines) - 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        s, e = lines[mid]['start'], lines[mid]['end']
+        if offset < s:
+            hi = mid - 1
+        elif offset > e:
+            lo = mid + 1
+        else:
+            # inside this line (or at end)
+            return mid + 1, (offset - s) + 1
+    # If beyond last content end, it's at EOF after last line
+    last = lines[-1]
+    return last['line'], last['length'] + 1
+
+
+def _slice_content_by_lines(content: str, index, start_line: int, end_line: int) -> str:
+    """
+    Return the content from start_line to end_line inclusive, preserving original EOLs.
+    """
+    if start_line < 1 or end_line < start_line:
+        raise ValueError('Invalid line range')
+    lines = index['lines']
+    if not lines:
+        return ''
+    end_line = min(end_line, len(lines))
+    parts = []
+    for i in range(start_line - 1, end_line):
+        ln = lines[i]
+        parts.append(content[ln['start']:ln['end']] + ln['eol'])
+    return ''.join(parts)
+
+
+def _hash_sha256(text: str) -> str:
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def _normalize_newlines(text: str, newline_style: str, fallback: str = 'LF') -> str:
+    """
+    Normalize text newlines to match newline_style ('LF'|'CRLF'|'CR'|'mixed'|'none').
+    If 'mixed' or 'none', use fallback ('LF' by default).
+    """
+    if newline_style in ('mixed', 'none'):
+        target = '\n' if fallback == 'LF' else ('\r\n' if fallback == 'CRLF' else '\r')
+    else:
+        target = '\n' if newline_style == 'LF' else ('\r\n' if newline_style == 'CRLF' else '\r')
+    # Replace any of \r\n, \r, or \n with target
+    return re.sub(r"\r\n|\r|\n", target, text)
+
+
 class ReadFolderContentTool:
     schema = {
         "type": "function",
@@ -137,20 +198,23 @@ class ReadFileContentTool:
         "type": "function",
         "name": "read_file_content",
         "description": (
-            "Read and return the content of a specified file as a string. "
-            "Provide the file path relative to the project root (where main.py is called). "
-            "Optionally return an index for line/column addressing. "
-            "Use this tool to access the contents of project files, scripts, or data files. "
-            "Safety: Never use this tool to access system or hidden files. Only use for project-relevant paths."
+            "Read and return file content. Optionally return an index or only a line range to save tokens. "
+            "Safety: Never use this tool to access system or hidden files. Only project-relevant paths."
         ),
         "strict": True,
         "parameters": {
             "type": "object",
             "properties": {
-                "relative_path": {"type": "string", "description": "The file path relative to the project root (where main.py is called)."},
-                "with_index": {"type": "boolean", "description": "If true, also return line/column index metadata.", "default": False},
+                "relative_path": {"type": "string", "description": "Path relative to project root."},
+                "with_index": {"type": "boolean", "description": "[Legacy] If true, return full index.", "default": False},
+                "content_mode": {"type": "string", "enum": ["full", "range", "none"], "default": "full", "description": "full = return whole file; range = only start..end lines; none = no content."},
+                "start_line": {"type": "integer", "minimum": 1, "description": "First line when content_mode='range'. Inclusive."},
+                "end_line": {"type": "integer", "minimum": 1, "description": "Last line when content_mode='range'. Inclusive."},
+                "index_mode": {"type": "string", "enum": ["none", "full", "range"], "default": "none", "description": "Controls index verbosity. 'with_index'=True implies 'full' if this is 'none'."},
+                "with_hash": {"type": "boolean", "default": False, "description": "Include SHA-256 of current file content."},
+                "max_chars": {"type": "integer", "minimum": 1, "description": "If set, clip returned content to this many characters."}
             },
-            "required": ["relative_path", "with_index"],
+            "required": ["relative_path", "with_index", "content_mode", "index_mode", "with_hash", "max_chars", "start_line", "end_line"],
             "additionalProperties": False,
         },
     }
@@ -158,19 +222,57 @@ class ReadFileContentTool:
     def __init__(self, root_path):
         self.root_path = root_path
 
-    def run(self, relative_path, with_index=False):
+    def run(self, relative_path, with_index=False, content_mode='full', start_line=None, end_line=None, index_mode='none', with_hash=False, max_chars=None):
         file_path = os.path.join(self.root_path, relative_path)
         if not os.path.isfile(file_path):
             return {"status": "error", "message": "File not found."}
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
-            result = {"status": "success", "content": content}
-            if with_index:
-                idx = _index_text(content)
-                result.update({
-                    "index": idx,
-                })
+            idx = _index_text(content)
+            result = {"status": "success"}
+
+            # Content handling
+            if content_mode == 'none':
+                pass
+            elif content_mode == 'range':
+                if start_line is None or end_line is None:
+                    return {"status": "error", "message": "start_line and end_line required for content_mode='range'."}
+                try:
+                    slice_text = _slice_content_by_lines(content, idx, start_line, end_line)
+                except Exception as e:
+                    return {"status": "error", "message": str(e)}
+                if max_chars is not None and len(slice_text) > max_chars:
+                    slice_text = slice_text[:max_chars]
+                result["content"] = slice_text
+            else:  # full
+                out = content
+                if max_chars is not None and len(out) > max_chars:
+                    out = out[:max_chars]
+                result["content"] = out
+
+            # Index handling
+            if index_mode == 'full' or (with_index and index_mode == 'none'):
+                result["index"] = idx
+            elif index_mode == 'range':
+                if start_line is None or end_line is None:
+                    return {"status": "error", "message": "start_line and end_line required for index_mode='range'."}
+                lines = idx['lines']
+                sl = max(1, start_line)
+                el = min(end_line, len(lines))
+                result["index"] = {
+                    'line_count': idx['line_count'],
+                    'newline': idx['newline'],
+                    'range': {
+                        'start_line': sl,
+                        'end_line': el,
+                        'lines': lines[sl-1:el],
+                    }
+                }
+
+            if with_hash:
+                result['sha256'] = _hash_sha256(content)
+
             return result
         except Exception as e:
             return {"status": "error", "message": str(e)}
@@ -389,8 +491,11 @@ class InsertTextInFileTool:
                 "line": {"type": "integer", "minimum": 1, "description": "1-based line number."},
                 "column": {"type": "integer", "minimum": 1, "description": "1-based column within the line (content only)."},
                 "text": {"type": "string", "description": "Text to insert at the position."},
+                "expected_sha256": {"type": "string", "description": "If provided, ensure file hash matches before writing."},
+                "normalize_newlines": {"type": "boolean", "default": True, "description": "Normalize inserted text newlines to file's style."},
+                "newline_fallback": {"type": "string", "enum": ["LF", "CRLF", "CR"], "default": "LF", "description": "Fallback when file has mixed/none newlines."}
             },
-            "required": ["relative_path", "line", "column", "text"],
+            "required": ["relative_path", "line", "column", "text", "expected_sha256", "normalize_newlines", "newline_fallback"],
             "additionalProperties": False,
         },
     }
@@ -399,7 +504,7 @@ class InsertTextInFileTool:
         self.root_path = root_path
         self.permission_required = permission_required
 
-    def run(self, relative_path, line, column, text):
+    def run(self, relative_path, line, column, text, expected_sha256=None, normalize_newlines=True, newline_fallback='LF'):
         abs_root = os.path.abspath(self.root_path)
         file_path = os.path.join(self.root_path, relative_path)
         abs_file = os.path.abspath(file_path)
@@ -410,16 +515,24 @@ class InsertTextInFileTool:
         try:
             with open(abs_file, 'r', encoding='utf-8') as f:
                 content = f.read()
+            if expected_sha256 is not None:
+                actual = _hash_sha256(content)
+                if actual != expected_sha256:
+                    return {"status": "error", "message": "File hash mismatch; aborting insert.", "actual_sha256": actual}
             idx = _index_text(content)
             try:
                 offset = _offset_from_line_col(idx, line, column)
             except ValueError as ve:
                 return {"status": "error", "message": str(ve)}
 
-            new_content = content[:offset] + text + content[offset:]
+            ins_text = text
+            if normalize_newlines:
+                ins_text = _normalize_newlines(ins_text, idx['newline'], newline_fallback)
+
+            new_content = content[:offset] + ins_text + content[offset:]
 
             if self.permission_required:
-                preview = text if len(text) <= 80 else text[:77] + '...'
+                preview = ins_text if len(ins_text) <= 80 else ins_text[:77] + '...'
                 permission = input(
                     f"Insert into '{relative_path}' at L{line}:C{column}?\n"
                     f"Text preview: {preview}\nProceed? (y/n): "
@@ -432,8 +545,9 @@ class InsertTextInFileTool:
 
             return {
                 "status": "success",
-                "message": f"Inserted {len(text)} char(s) at L{line}:C{column}.",
+                "message": f"Inserted {len(ins_text)} char(s) at L{line}:C{column}.",
                 "new_length": len(new_content),
+                "sha256": _hash_sha256(new_content),
             }
         except Exception as e:
             return {"status": "error", "message": str(e)}
@@ -457,8 +571,11 @@ class ReplaceTextInFileTool:
                 "end_line": {"type": "integer", "minimum": 1, "description": "End line (exclusive end position)."},
                 "end_column": {"type": "integer", "minimum": 1, "description": "End column (exclusive)."},
                 "text": {"type": "string", "description": "Replacement text."},
+                "expected_sha256": {"type": "string", "description": "If provided, ensure file hash matches before writing."},
+                "normalize_newlines": {"type": "boolean", "default": True, "description": "Normalize replacement text newlines to file's style."},
+                "newline_fallback": {"type": "string", "enum": ["LF", "CRLF", "CR"], "default": "LF", "description": "Fallback when file has mixed/none newlines."}
             },
-            "required": ["relative_path", "start_line", "start_column", "end_line", "end_column", "text"],
+            "required": ["relative_path", "start_line", "start_column", "end_line", "end_column", "text", "expected_sha256", "normalize_newlines", "newline_fallback"],
             "additionalProperties": False,
         },
     }
@@ -467,7 +584,7 @@ class ReplaceTextInFileTool:
         self.root_path = root_path
         self.permission_required = permission_required
 
-    def run(self, relative_path, start_line, start_column, end_line, end_column, text):
+    def run(self, relative_path, start_line, start_column, end_line, end_column, text, expected_sha256=None, normalize_newlines=True, newline_fallback='LF'):
         abs_root = os.path.abspath(self.root_path)
         file_path = os.path.join(self.root_path, relative_path)
         abs_file = os.path.abspath(file_path)
@@ -478,6 +595,10 @@ class ReplaceTextInFileTool:
         try:
             with open(abs_file, 'r', encoding='utf-8') as f:
                 content = f.read()
+            if expected_sha256 is not None:
+                actual = _hash_sha256(content)
+                if actual != expected_sha256:
+                    return {"status": "error", "message": "File hash mismatch; aborting replace.", "actual_sha256": actual}
             idx = _index_text(content)
             try:
                 start_off = _offset_from_line_col(idx, start_line, start_column)
@@ -487,10 +608,14 @@ class ReplaceTextInFileTool:
             if end_off < start_off:
                 return {"status": "error", "message": "End position precedes start position."}
 
-            new_content = content[:start_off] + text + content[end_off:]
+            rep_text = text
+            if normalize_newlines:
+                rep_text = _normalize_newlines(rep_text, idx['newline'], newline_fallback)
+
+            new_content = content[:start_off] + rep_text + content[end_off:]
 
             if self.permission_required:
-                preview = text if len(text) <= 80 else text[:77] + '...'
+                preview = rep_text if len(rep_text) <= 80 else rep_text[:77] + '...'
                 permission = input(
                     f"Replace in '{relative_path}' from L{start_line}:C{start_column} to L{end_line}:C{end_column}?\n"
                     f"Replacement preview: {preview}\nProceed? (y/n): "
@@ -505,9 +630,81 @@ class ReplaceTextInFileTool:
                 "status": "success",
                 "message": (
                     f"Replaced range L{start_line}:C{start_column}-L{end_line}:C{end_column} "
-                    f"with {len(text)} char(s)."
+                    f"with {len(rep_text)} char(s)."
                 ),
                 "new_length": len(new_content),
+                "sha256": _hash_sha256(new_content),
             }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+
+class SearchInFileTool:
+    schema = {
+        "type": "function",
+        "name": "search_in_file",
+        "description": (
+            "Search for a string or regex in a file and return match positions with optional context."
+        ),
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "relative_path": {"type": "string", "description": "Path to the file relative to project root."},
+                "query": {"type": "string", "description": "Literal string or regex pattern to search for."},
+                "regex": {"type": "boolean", "default": False, "description": "Interpret query as a regex if true."},
+                "case_sensitive": {"type": "boolean", "default": False, "description": "Case-sensitive search if true."},
+                "max_results": {"type": "integer", "minimum": 1, "default": 20, "description": "Maximum number of matches to return."},
+                "before_lines": {"type": "integer", "minimum": 0, "default": 0, "description": "Number of context lines before the match."},
+                "after_lines": {"type": "integer", "minimum": 0, "default": 0, "description": "Number of context lines after the match."}
+            },
+            "required": ["relative_path", "query", "regex", "case_sensitive", "max_results", "before_lines", "after_lines"],
+            "additionalProperties": False,
+        },
+    }
+
+    def __init__(self, root_path):
+        self.root_path = root_path
+
+    def run(self, relative_path, query, regex=False, case_sensitive=False, max_results=20, before_lines=0, after_lines=0):
+        file_path = os.path.join(self.root_path, relative_path)
+        if not os.path.isfile(file_path):
+            return {"status": "error", "message": "File not found."}
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            idx = _index_text(content)
+            flags = 0 if case_sensitive else re.IGNORECASE
+            if regex:
+                pattern = re.compile(query, flags)
+            else:
+                pattern = re.compile(re.escape(query), flags)
+
+            results = []
+            for m in pattern.finditer(content):
+                if len(results) >= max_results:
+                    break
+                start_off, end_off = m.start(), m.end()
+                try:
+                    sl, sc = _line_col_from_offset(idx, start_off)
+                    el, ec = _line_col_from_offset(idx, end_off)
+                except ValueError:
+                    continue
+                # Context
+                ctx_start = max(1, sl - before_lines)
+                ctx_end = min(idx['line_count'], el + after_lines)
+                context_text = _slice_content_by_lines(content, idx, ctx_start, ctx_end) if (before_lines or after_lines) else ''
+                results.append({
+                    'start_line': sl,
+                    'start_column': sc,
+                    'end_line': el,
+                    'end_column': ec,
+                    'match': m.group(0),
+                    'context_start_line': ctx_start if context_text else None,
+                    'context_end_line': ctx_end if context_text else None,
+                    'context': context_text if context_text else None,
+                })
+
+            return {"status": "success", "count": len(results), "results": results, "line_count": idx['line_count']}
         except Exception as e:
             return {"status": "error", "message": str(e)}
