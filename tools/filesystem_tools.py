@@ -199,6 +199,7 @@ class ReadFileContentTool:
         "name": "read_file_content",
         "description": (
             "Read and return file content. Optionally return an index or only a line range to save tokens. "
+            "Prefer content_mode='range' and index_mode='range' when suitable to minimize tokens. "
             "Safety: Never use this tool to access system or hidden files. Only project-relevant paths."
         ),
         "strict": True,
@@ -285,6 +286,8 @@ class WriteFileContentTool:
         "description": (
             "Write string content to a specified file. Creates the file if it does not exist. "
             "Provide the file path relative to the project root (where main.py is called) and the content as a string. "
+            "Token policy: Use this ONLY for new files or full-file rewrites. "
+            "For partial edits, prefer insert_text_in_file or replace_text_in_file to minimize tokens and preserve context. "
             "Use this tool to save or update project files, scripts, or data files. "
             "Safety: Never use this tool to access system or hidden files. Only use for project-relevant paths."
         ),
@@ -480,6 +483,7 @@ class InsertTextInFileTool:
         "name": "insert_text_in_file",
         "description": (
             "Insert text into a file at a specific (line, column) position. "
+            "Preferred for small/targeted changes; avoids rewriting full files and reduces token usage. "
             "Line and column are 1-based and column counts characters within the line content only. "
             "Safety: Only operates within the project root. Prompts for confirmation when enabled."
         ),
@@ -559,6 +563,7 @@ class ReplaceTextInFileTool:
         "name": "replace_text_in_file",
         "description": (
             "Replace text in a file between two (line, column) positions. "
+            "Preferred for partial edits; minimizes tokens and preserves file integrity. "
             "Start is inclusive, end is exclusive. 1-based line/column, column counts characters within line content only."
         ),
         "strict": True,
