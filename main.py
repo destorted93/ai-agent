@@ -6,14 +6,17 @@ from tools import (
     CreateUserMemoryTool,
     UpdateUserMemoryTool,
     DeleteUserMemoryTool,
-    GetPlansTool,
-    CreatePlanTool,
-    UpdatePlanTool,
-    DeletePlanTool,
+    GetTodosTool,
+    CreateTodoTool,
+    UpdateTodoTool,
+    DeleteTodoTool,
     ReadFolderContentTool,
     ReadFileContentTool,
     WriteFileContentTool,
     CreateFolderTool,
+    RemovePathsTool,
+    InsertTextInFileTool,
+    ReplaceTextInFileTool,
     CreateWordDocumentTool,
     RunTerminalCommandsTool,
     MultiXYPlotTool,
@@ -22,6 +25,7 @@ from tools import (
 )
 
 from chat_history import ChatHistoryManager
+from tools.todo_tools import TodoManager
 
 import os
 import base64
@@ -36,26 +40,31 @@ def color_text(text, color_code):
 if __name__ == "__main__":
     # Initialize chat history manager
     chat_history_manager = ChatHistoryManager()
+    todo_manager = TodoManager()
 
     agent_name = "Djasha"
     user_id = "user_12345"
     # Select which tools to include here
+    project_root = os.path.dirname(os.path.abspath(__file__))
     selected_tools = [
         GetUserMemoriesTool(),
         CreateUserMemoryTool(),
         UpdateUserMemoryTool(),
         DeleteUserMemoryTool(),
-        GetPlansTool(),
-        CreatePlanTool(),
-        UpdatePlanTool(),
-        DeletePlanTool(),
+        GetTodosTool(),
+        CreateTodoTool(),
+        UpdateTodoTool(),
+        DeleteTodoTool(),
         # MultiXYPlotTool(),
-        ReadFolderContentTool(root_path=os.path.dirname(os.path.abspath(__file__))),
-        ReadFileContentTool(root_path=os.path.dirname(os.path.abspath(__file__))),
-        WriteFileContentTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=False),
-        CreateFolderTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=False),
-        # RunTerminalCommandsTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=True),
-        # CreateWordDocumentTool(root_path=os.path.dirname(os.path.abspath(__file__)), permission_required=False),
+        ReadFolderContentTool(root_path=project_root),
+        ReadFileContentTool(root_path=project_root),
+        WriteFileContentTool(root_path=project_root, permission_required=False),
+        CreateFolderTool(root_path=project_root, permission_required=False),
+        RemovePathsTool(root_path=project_root, permission_required=False),
+        InsertTextInFileTool(root_path=project_root, permission_required=False),
+        ReplaceTextInFileTool(root_path=project_root, permission_required=False),
+        # RunTerminalCommandsTool(root_path=project_root, permission_required=True),
+        # CreateWordDocumentTool(root_path=project_root, permission_required=False),
         # WebSearchTool(),
         # ImageGenerationTool(quality="medium"),
         # Add more tools as needed
@@ -71,6 +80,7 @@ if __name__ == "__main__":
         elif choice in ['n', 'no']:
             chat_history_manager.clear_history()
             chat_history_manager.clear_generated_images()
+            todo_manager.clear_todos()
             break
         else:
             print(color_text("Please enter 'y' or 'n'.", '31'))
@@ -80,7 +90,7 @@ if __name__ == "__main__":
     config = AgentConfig(
         model_name="gpt-5",
         temperature=1.0,
-        reasoning={"effort": "low", "summary": "auto"},
+        reasoning={"effort": "medium", "summary": "auto"},
         text={"verbosity": "medium"},
         store=False,
         stream=True,
@@ -101,7 +111,7 @@ if __name__ == "__main__":
 
     while True:
         user_input = input(color_text("You: ", '35'))
-        if user_input.lower() == 'exit' or user_input.lower() == 'quit' or user_input.lower() == 'q':
+        if user_input.lower() in ('exit', 'quit', 'q'):
             print(color_text("Exiting...", '31'))
             break
 
@@ -160,7 +170,7 @@ if __name__ == "__main__":
                     partial_images[item_id] = {}
                 partial_images[item_id][sequence_number] = image
                 # Save each partial image with sequence_number
-                images_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
+                images_folder = os.path.join(project_root, "images")
                 os.makedirs(images_folder, exist_ok=True)
                 image_path = os.path.join(images_folder, f"{item_id}_partial_{sequence_number}.png")
                 image.save(image_path, format="PNG")
@@ -171,7 +181,7 @@ if __name__ == "__main__":
                 sequence_number = event['data'].sequence_number
                 # Save the last partial image for this item_id and sequence_number
                 if item_id in partial_images and sequence_number in partial_images[item_id]:
-                    images_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images")
+                    images_folder = os.path.join(project_root, "images")
                     os.makedirs(images_folder, exist_ok=True)
                     image_path = os.path.join(images_folder, f"{item_id}_completed_{sequence_number}.png")
                     partial_images[item_id][sequence_number].save(image_path, format="PNG")

@@ -5,11 +5,11 @@ from .memory_tools import (
     DeleteUserMemoryTool,
 )
 
-from .planning_tools import (
-    GetPlansTool,
-    CreatePlanTool,
-    UpdatePlanTool,
-    DeletePlanTool,
+from .todo_tools import (
+    GetTodosTool,
+    CreateTodoTool,
+    UpdateTodoTool,
+    DeleteTodoTool,
 )
 
 from .filesystem_tools import (
@@ -17,6 +17,9 @@ from .filesystem_tools import (
     ReadFileContentTool,
     WriteFileContentTool,
     CreateFolderTool,
+    RemovePathsTool,
+    InsertTextInFileTool,
+    ReplaceTextInFileTool,
 )
 from .document_tools import CreateWordDocumentTool
 from .devops_tools import RunTerminalCommandsTool
@@ -32,11 +35,14 @@ __all__ = [
     'ReadFileContentTool',
     'WriteFileContentTool',
     'CreateFolderTool',
+    'RemovePathsTool',
+    'InsertTextInFileTool',
+    'ReplaceTextInFileTool',
     'CreateWordDocumentTool',
-    'GetPlansTool',
-    'CreatePlanTool',
-    'UpdatePlanTool',
-    'DeletePlanTool',
+    'GetTodosTool',
+    'CreateTodoTool',
+    'UpdateTodoTool',
+    'DeleteTodoTool',
     'RunTerminalCommandsTool',
     'MultiXYPlotTool',
     'WebSearchTool',

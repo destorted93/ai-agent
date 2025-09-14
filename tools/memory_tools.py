@@ -6,9 +6,8 @@ class GetUserMemoriesTool:
         "type": "function",
         "name": "get_user_memories",
         "description": (
-            "Retrieve a list of the user's long-term and emotional memories. These memories are concise (50-150 words), and include important facts, preferences, explicit requests, ideas, and emotional states or patterns detected over past interactions. "
-            "Use this tool especially at the start of a new interaction or session, or whenever you lack information about the user. "
-            "You may also call this tool at any time to refresh your knowledge of the user's current available memories."
+            "Retrieve the user's long-term and emotional memories. Entries are concise (typically 50–150 characters) and include important facts, preferences, explicit requests, ideas, and patterns over past interactions. "
+            "Use at session start, when uncertain about the user, or to refresh current memories."
         ),
         "strict": True,
         "parameters": {
@@ -28,23 +27,10 @@ class CreateUserMemoryTool:
         "type": "function",
         "name": "create_user_memory",
         "description": (
-            "Create one or more memory entries for the user. Call this tool with a list of texts, each to be saved as a separate memory. "
-            "Use this tool only for long-term or emotional memories: important facts, preferences, explicit requests, ideas, emotional states or patterns over multiple interactions. "
-            "You may use this tool multiple times in a single response if needed, or provide multiple memories at once. "
-            "Memory format rules: "
-            "- Always output memory in English, regardless of chat language. "
-            "- One line, compact, precise, understandable. "
-            "- Start with 'User ...' "
-            "- One fact per memory. "
-            "- Aim for 50-150 characters when possible; shorter is fine if clear. "
-            "Safety & Privacy: "
-            "- Never store secrets: passwords, full credit cards, government IDs, API keys. "
-            "Core principles: "
-            "- Store only what truly matters: stable preferences, enduring facts, long-term goals, ongoing projects, constraints, repeatable workflows, strong dislikes, and user-specific context the assistant should consistently honor. "
-            "- Never spam memories. "
-            "- Prefer precision over verbosity. "
-            "- Don't duplicate. "
-            "- If a user explicitly asks 'remember this', and it meets value criteria, save it."
+            "Create one or more memory entries for the user. Each text becomes a separate memory. "
+            "Use only for durable facts: preferences, goals, constraints, ongoing projects, repeatable workflows, strong dislikes, or explicit 'remember this' requests. "
+            "Format: English; one line; start with 'User ...'; one fact per memory; aim for 50–150 characters. "
+            "Never store secrets (passwords, credit cards, IDs, API keys). Avoid duplication and spam. Prefer precision over verbosity."
         ),
         "strict": True,
         "parameters": {
@@ -52,7 +38,7 @@ class CreateUserMemoryTool:
             "properties": {
                 "texts": {
                     "type": "array",
-                    "items": {"type": "string", "description": "Each text is one memory. Must follow all format, safety, and value rules above."},
+                    "items": {"type": "string", "description": "Each text is one memory. Must follow the format and safety rules."},
                     "description": "A list of memory texts to save. Each text is one memory.",
                 }
             },
@@ -74,14 +60,8 @@ class UpdateUserMemoryTool:
         "type": "function",
         "name": "update_user_memory",
         "description": (
-            "Update one or more existing user memories. Call this tool with a list of entries, each containing an id and the new text for the memory. "
-            "This tool is used to revise or correct long-term or emotional memories previously stored. "
-            "Rules for updating: "
-            "- Only update memories that truly need revision (e.g., factual corrections, improved clarity, or user-requested changes). "
-            "- Do not use for trivial edits or to spam updates. "
-            "- Updated text must follow all memory format, safety, and value rules: English, one line, compact, precise, start with 'User ...', one fact per memory, 50-150 characters, no secrets, no duplicates. "
-            "- If a memory id does not exist, return an error for that id. "
-            "- If a user explicitly asks to update a memory and it meets value criteria, update it."
+            "Update existing user memories. Use only for necessary corrections or clarity improvements, or when the user requests changes. "
+            "Updated text must follow all memory rules: English, one line, start with 'User ...', one fact, 50–150 characters, no secrets, no duplicates."
         ),
         "strict": True,
         "parameters": {
@@ -93,7 +73,7 @@ class UpdateUserMemoryTool:
                         "type": "object",
                         "properties": {
                             "id": {"type": "string", "description": "The id of the memory to update."},
-                            "text": {"type": "string", "description": "The new text for the memory. Must follow all format, safety, and value rules."},
+                            "text": {"type": "string", "description": "The new text for the memory (must follow rules)."},
                         },
                         "required": ["id", "text"],
                         "additionalProperties": False,
@@ -119,15 +99,8 @@ class DeleteUserMemoryTool:
         "type": "function",
         "name": "delete_user_memory",
         "description": (
-            "Delete one or more existing user memories. Call this tool with a list of memory ids to delete. "
-            "Use this tool when you detect from context that certain memories should be removed, either due to explicit user request or when there are conflicts (e.g., new memories contradict existing ones and deletion is the only solution). "
-            "After successful deletion, the ids of the remaining memories will be updated to be consecutive, starting from 1. "
-            "Rules for deletion: "
-            "- Only delete memories when truly necessary (explicit user request, irreconcilable conflict, or outdated/incorrect information). "
-            "- Do not use for trivial or frequent deletions. "
-            "- Always confirm the ids to be deleted are correct and relevant. "
-            "- Never delete memories that are still valuable or needed for future interactions. "
-            "- Return success for each deleted id, and error for each id not found or if deletion fails."
+            "Delete one or more existing user memories by id. Use for explicit user requests or irreconcilable conflicts/outdated info. "
+            "After successful deletion, remaining memory ids are re-numbered starting at 1. Avoid deleting still-valuable memories."
         ),
         "strict": True,
         "parameters": {

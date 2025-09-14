@@ -4,6 +4,7 @@
 /chat_history/chat_history*.json
 /chat_history/generated_images.json
 /memory/memories*.json
+/tools/todos*.json
 /sandbox/
 
 # Python bytecode and caches
