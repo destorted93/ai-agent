@@ -67,7 +67,7 @@ if __name__ == "__main__":
         SearchInFileTool(root_path=project_root),
         # RunTerminalCommandsTool(root_path=project_root, permission_required=True),
         # CreateWordDocumentTool(root_path=project_root, permission_required=False),
-        # WebSearchTool(),
+        WebSearchTool(),
         # ImageGenerationTool(quality="medium"),
         # Add more tools as needed
     ]

@@ -225,13 +225,20 @@ class ReadFileContentTool:
 
     def run(self, relative_path, with_index=False, content_mode='full', start_line=None, end_line=None, index_mode='none', with_hash=False, max_chars=None):
         file_path = os.path.join(self.root_path, relative_path)
-        if not os.path.isfile(file_path):
+        abs_file_path = os.path.abspath(file_path)
+        abs_root_path = os.path.abspath(self.root_path)
+        if not abs_file_path.startswith(abs_root_path):
+            return {"status": "error", "message": "File path is outside the project scope."}
+        if not os.path.isfile(abs_file_path):
             return {"status": "error", "message": "File not found."}
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(abs_file_path, "r", encoding="utf-8") as f:
                 content = f.read()
-            idx = _index_text(content)
+            # Only build index if required by content or index options
+            need_index = (content_mode == 'range') or (index_mode in ('full', 'range')) or (with_index and index_mode == 'none')
+            idx = _index_text(content) if need_index else None
             result = {"status": "success"}
+            content_truncated = False
 
             # Content handling
             if content_mode == 'none':
@@ -240,24 +247,32 @@ class ReadFileContentTool:
                 if start_line is None or end_line is None:
                     return {"status": "error", "message": "start_line and end_line required for content_mode='range'."}
                 try:
+                    if idx is None:
+                        idx = _index_text(content)
                     slice_text = _slice_content_by_lines(content, idx, start_line, end_line)
                 except Exception as e:
                     return {"status": "error", "message": str(e)}
                 if max_chars is not None and len(slice_text) > max_chars:
                     slice_text = slice_text[:max_chars]
+                    content_truncated = True
                 result["content"] = slice_text
             else:  # full
                 out = content
                 if max_chars is not None and len(out) > max_chars:
                     out = out[:max_chars]
+                    content_truncated = True
                 result["content"] = out
 
             # Index handling
             if index_mode == 'full' or (with_index and index_mode == 'none'):
+                if idx is None:
+                    idx = _index_text(content)
                 result["index"] = idx
             elif index_mode == 'range':
                 if start_line is None or end_line is None:
                     return {"status": "error", "message": "start_line and end_line required for index_mode='range'."}
+                if idx is None:
+                    idx = _index_text(content)
                 lines = idx['lines']
                 sl = max(1, start_line)
                 el = min(end_line, len(lines))
@@ -271,6 +286,8 @@ class ReadFileContentTool:
                     }
                 }
 
+            if content_truncated:
+                result['content_truncated'] = True
             if with_hash:
                 result['sha256'] = _hash_sha256(content)
 
@@ -661,9 +678,18 @@ class SearchInFileTool:
                 "case_sensitive": {"type": "boolean", "default": False, "description": "Case-sensitive search if true."},
                 "max_results": {"type": "integer", "minimum": 1, "default": 20, "description": "Maximum number of matches to return."},
                 "before_lines": {"type": "integer", "minimum": 0, "default": 0, "description": "Number of context lines before the match."},
-                "after_lines": {"type": "integer", "minimum": 0, "default": 0, "description": "Number of context lines after the match."}
+                "after_lines": {"type": "integer", "minimum": 0, "default": 0, "description": "Number of context lines after the match."},
+                "include_context": {"type": "boolean", "default": False, "description": "Include context text in results. If false, only positions are returned."},
+                "include_match": {"type": "boolean", "default": True, "description": "Include the matched text value in results (truncated by caps)."},
+                "max_match_chars": {"type": "integer", "minimum": 1, "default": 200, "description": "Max characters of match text to include per result."},
+                "max_context_chars": {"type": "integer", "minimum": 1, "default": 500, "description": "Max characters of context text to include per result."},
+                "max_total_chars": {"type": "integer", "minimum": 256, "default": 8000, "description": "Global cap on total characters from all matches/context in the response."},
+                "whole_word": {"type": "boolean", "default": False, "description": "When not using regex, match whole words only (adds \\b boundaries)."},
+                "multiline": {"type": "boolean", "default": False, "description": "Use regex MULTILINE mode (affects ^ and $)."},
+                "dotall": {"type": "boolean", "default": False, "description": "Use regex DOTALL mode (dot matches newlines)."},
+                "return_offsets": {"type": "boolean", "default": False, "description": "Include 0-based byte offsets for start/end along with line/column."}
             },
-            "required": ["relative_path", "query", "regex", "case_sensitive", "max_results", "before_lines", "after_lines"],
+            "required": ["relative_path", "query", "regex", "case_sensitive", "max_results", "before_lines", "after_lines", "include_context", "include_match", "max_match_chars", "max_context_chars", "max_total_chars", "whole_word", "multiline", "dotall", "return_offsets"],
             "additionalProperties": False,
         },
     }
@@ -671,7 +697,25 @@ class SearchInFileTool:
     def __init__(self, root_path):
         self.root_path = root_path
 
-    def run(self, relative_path, query, regex=False, case_sensitive=False, max_results=20, before_lines=0, after_lines=0):
+    def run(
+        self,
+        relative_path,
+        query,
+        regex=False,
+        case_sensitive=False,
+        max_results=20,
+        before_lines=0,
+        after_lines=0,
+        include_context=False,
+        include_match=True,
+        max_match_chars=200,
+        max_context_chars=500,
+        max_total_chars=8000,
+        whole_word=False,
+        multiline=False,
+        dotall=False,
+        return_offsets=False,
+    ):
         file_path = os.path.join(self.root_path, relative_path)
         if not os.path.isfile(file_path):
             return {"status": "error", "message": "File not found."}
@@ -679,37 +723,118 @@ class SearchInFileTool:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             idx = _index_text(content)
-            flags = 0 if case_sensitive else re.IGNORECASE
+            # Build regex flags
+            flags = 0
+            if not case_sensitive:
+                flags |= re.IGNORECASE
+            if multiline:
+                flags |= re.MULTILINE
+            if dotall:
+                flags |= re.DOTALL
+
+            # Compile pattern
             if regex:
-                pattern = re.compile(query, flags)
+                try:
+                    pattern = re.compile(query, flags)
+                except re.error as e:
+                    return {"status": "error", "message": f"Invalid regex: {e}"}
             else:
-                pattern = re.compile(re.escape(query), flags)
+                if query == "":
+                    return {"status": "error", "message": "Query must not be empty."}
+                pat = re.escape(query)
+                if whole_word:
+                    pat = r"\b" + pat + r"\b"
+                pattern = re.compile(pat, flags)
+
+            def _clip(s: str, limit: int):
+                if limit is None or limit <= 0 or len(s) <= limit:
+                    return s, False
+                return s[:limit], True
 
             results = []
+            total_chars = 0
+            truncated = False
+            limited_by = []
+
             for m in pattern.finditer(content):
                 if len(results) >= max_results:
+                    truncated = True
+                    limited_by.append("max_results") if "max_results" not in limited_by else None
                     break
                 start_off, end_off = m.start(), m.end()
+                # Skip zero-length matches to avoid noisy outputs
+                if end_off <= start_off:
+                    continue
                 try:
                     sl, sc = _line_col_from_offset(idx, start_off)
                     el, ec = _line_col_from_offset(idx, end_off)
                 except ValueError:
                     continue
-                # Context
+
+                match_text = m.group(0)
+                match_out, match_trunc = ("", False)
+                if include_match:
+                    match_out, match_trunc = _clip(match_text, max_match_chars)
+
                 ctx_start = max(1, sl - before_lines)
                 ctx_end = min(idx['line_count'], el + after_lines)
-                context_text = _slice_content_by_lines(content, idx, ctx_start, ctx_end) if (before_lines or after_lines) else ''
-                results.append({
+                context_text = _slice_content_by_lines(content, idx, ctx_start, ctx_end) if include_context and (before_lines or after_lines) else ""
+                context_out, ctx_trunc = ("", False)
+                if include_context and context_text:
+                    context_out, ctx_trunc = _clip(context_text, max_context_chars)
+
+                # Enforce total char budget (only counting dynamic text fields)
+                needed = (len(match_out) if include_match else 0) + (len(context_out) if include_context else 0)
+                if max_total_chars is not None and total_chars + needed > max_total_chars:
+                    remaining = max(0, max_total_chars - total_chars)
+                    if include_context and len(context_out) > 0:
+                        take = min(len(context_out), remaining)
+                        context_out = context_out[:take]
+                        ctx_trunc = True
+                        remaining -= take
+                    if include_match and remaining > 0 and len(match_out) > 0:
+                        take = min(len(match_out), remaining)
+                        match_out = match_out[:take]
+                        match_trunc = True
+                        remaining -= take
+                    if (include_match and len(match_out) == 0) and (not include_context or len(context_out) == 0):
+                        truncated = True
+                        limited_by.append("max_total_chars") if "max_total_chars" not in limited_by else None
+                        break
+                    truncated = True
+                    if "max_total_chars" not in limited_by:
+                        limited_by.append("max_total_chars")
+
+                total_chars += (len(match_out) if include_match else 0) + (len(context_out) if include_context else 0)
+
+                item = {
                     'start_line': sl,
                     'start_column': sc,
                     'end_line': el,
                     'end_column': ec,
-                    'match': m.group(0),
-                    'context_start_line': ctx_start if context_text else None,
-                    'context_end_line': ctx_end if context_text else None,
-                    'context': context_text if context_text else None,
-                })
+                }
+                if return_offsets:
+                    item['start_offset'] = start_off
+                    item['end_offset'] = end_off
+                if include_match:
+                    item['match'] = match_out
+                    item['match_length'] = len(match_text)
+                    item['match_truncated'] = match_trunc
+                if include_context and (before_lines or after_lines):
+                    item['context_start_line'] = ctx_start
+                    item['context_end_line'] = ctx_end
+                    item['context'] = context_out
+                    item['context_truncated'] = ctx_trunc
 
-            return {"status": "success", "count": len(results), "results": results, "line_count": idx['line_count']}
+                results.append(item)
+
+            return {
+                "status": "success",
+                "count": len(results),
+                "results": results,
+                "line_count": idx['line_count'],
+                "truncated": truncated,
+                "limited_by": limited_by,
+            }
         except Exception as e:
             return {"status": "error", "message": str(e)}

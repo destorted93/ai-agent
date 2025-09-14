@@ -117,7 +117,7 @@ class GetTodosTool:
         "type": "function",
         "name": "get_todos",
         "description": (
-            "Retrieve the current ordered to-do items (id, date, time, text, status). Always call before: (a) creating a new to-do batch, (b) executing an item if state may have changed, (c) revising or deleting items. "
+            "Retrieve the current ordered to-do items (id, date, time, text, status). Call before: (a) creating a new to-do batch; (b) revising/deleting items when state may have changed; always re-fetch after deletion. "
             "Use to synchronize internal reasoning with persisted to-do state so you never act on stale assumptions."
         ),
         "strict": True,
