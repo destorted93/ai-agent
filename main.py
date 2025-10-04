@@ -92,7 +92,7 @@ if __name__ == "__main__":
     config = AgentConfig(
         model_name="gpt-5",
         temperature=1.0,
-        reasoning={"effort": "low", "summary": "auto"},
+        reasoning={"effort": "high", "summary": "auto"},
         text={"verbosity": "medium"},
         store=False,
         stream=True,
