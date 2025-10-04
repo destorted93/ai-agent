@@ -11,9 +11,151 @@ import threading
 import json
 from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton, QVBoxLayout, 
                               QHBoxLayout, QMenu, QTextEdit, QLineEdit, QScrollArea,
-                              QLabel, QFrame, QSizePolicy)
-from PyQt6.QtGui import QAction, QTextCursor, QFont, QTextOption
-from PyQt6.QtCore import Qt, QPoint, QEvent, pyqtSignal, QObject, QThread, pyqtSlot, QTimer
+                              QLabel, QFrame, QSizePolicy, QLayout)
+from PyQt6.QtGui import QAction, QTextCursor, QFont, QTextOption, QKeyEvent
+from PyQt6.QtCore import Qt, QPoint, QEvent, pyqtSignal, QObject, QThread, pyqtSlot, QTimer, QRect, QSize
+
+
+class MultilineInput(QTextEdit):
+    """Custom QTextEdit that sends message on Enter and adds newline on Shift+Enter."""
+    send_message = pyqtSignal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptRichText(False)
+        self.setPlaceholderText("Type your message or drag & drop files...")
+        
+        # Enable word wrap
+        self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        # Set fixed comfortable height matching original QLineEdit (with padding from stylesheet)
+        self.base_height = 40  # Standard single-line input height
+        self.max_lines = 10
+        
+        font_metrics = self.fontMetrics()
+        self.line_height = font_metrics.lineSpacing()
+        self.max_height = self.base_height + (self.line_height * (self.max_lines - 1))
+        
+        self.setFixedHeight(self.base_height)
+        
+        # Connect to textChanged to adjust height dynamically
+        self.textChanged.connect(self.adjust_height)
+        
+    def adjust_height(self):
+        """Adjust height based on content, up to max_lines."""
+        # Get document height and calculate needed height
+        doc_height = int(self.document().size().height())
+        
+        # Add padding (16px total - 8px top + 8px bottom from stylesheet)
+        new_height = doc_height + 16
+        
+        # Constrain between base and max height
+        new_height = max(self.base_height, min(new_height, self.max_height))
+        
+        if new_height != self.height():
+            self.setFixedHeight(new_height)
+        
+    def keyPressEvent(self, event: QKeyEvent):
+        """Handle Enter and Shift+Enter differently."""
+        if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+            if event.modifiers() == Qt.KeyboardModifier.ShiftModifier:
+                # Shift+Enter: insert newline
+                super().keyPressEvent(event)
+            else:
+                # Plain Enter: send message
+                self.send_message.emit()
+                event.accept()
+        else:
+            super().keyPressEvent(event)
+    
+    def clear_text(self):
+        """Clear the text content."""
+        self.clear()
+        # Reset to base height
+        self.setFixedHeight(self.base_height)
+
+
+class FlowLayout(QLayout):
+    """Custom layout that wraps items to multiple lines like a flow layout."""
+    def __init__(self, parent=None, margin=0, spacing=-1):
+        super().__init__(parent)
+        self.setContentsMargins(margin, margin, margin, margin)
+        self.setSpacing(spacing)
+        self.item_list = []
+
+    def __del__(self):
+        item = self.takeAt(0)
+        while item:
+            item = self.takeAt(0)
+
+    def addItem(self, item):
+        self.item_list.append(item)
+
+    def count(self):
+        return len(self.item_list)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self.item_list):
+            return self.item_list[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self.item_list):
+            return self.item_list.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        height = self._do_layout(QRect(0, 0, width, 0), True)
+        return height
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self.item_list:
+            size = size.expandedTo(item.minimumSize())
+        margin = self.contentsMargins()
+        size += QSize(margin.left() + margin.right(), margin.top() + margin.bottom())
+        return size
+
+    def _do_layout(self, rect, test_only):
+        x = rect.x()
+        y = rect.y()
+        line_height = 0
+        spacing = self.spacing()
+
+        for item in self.item_list:
+            widget = item.widget()
+            space_x = spacing
+            space_y = spacing
+            
+            next_x = x + item.sizeHint().width() + space_x
+            if next_x - space_x > rect.right() and line_height > 0:
+                x = rect.x()
+                y = y + line_height + space_y
+                next_x = x + item.sizeHint().width() + space_x
+                line_height = 0
+
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+
+            x = next_x
+            line_height = max(line_height, item.sizeHint().height())
+
+        return y + line_height - rect.y()
 
 
 class ChatWindow(QWidget):
@@ -23,6 +165,10 @@ class ChatWindow(QWidget):
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
         self.setWindowTitle("AI Chat")
         self.resize(600, 700)
+        
+        # Enable drag and drop
+        self.setAcceptDrops(True)
+        self.dropped_files = []
         
         # Chat display area
         layout = QVBoxLayout(self)
@@ -76,17 +222,62 @@ class ChatWindow(QWidget):
         scroll.setWidget(self.chat_container)
         layout.addWidget(scroll)
         
+        # Attached files area (hidden by default)
+        self.attached_files_widget = QWidget()
+        self.attached_files_widget.hide()
+        attached_files_main_layout = QHBoxLayout(self.attached_files_widget)
+        attached_files_main_layout.setContentsMargins(5, 5, 5, 5)
+        attached_files_main_layout.setSpacing(5)
+        
+        # Container for file chips - uses flow layout
+        self.files_container = QWidget()
+        self.files_container.setStyleSheet("""
+            QWidget {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 5px;
+                padding: 5px;
+            }
+        """)
+        
+        # Use FlowLayout for wrapping
+        self.files_layout = FlowLayout(self.files_container, margin=5, spacing=5)
+        
+        attached_files_main_layout.addWidget(self.files_container, 1)
+        
+        # Clear all button
+        self.clear_all_btn = QPushButton("Clear All")
+        self.clear_all_btn.setFixedHeight(24)
+        self.clear_all_btn.setToolTip("Clear all attached files")
+        self.clear_all_btn.clicked.connect(self.clear_attached_files)
+        self.clear_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3d3d3d;
+                color: #ff6b6b !important;
+                border: none;
+                border-radius: 3px;
+                font-size: 10px;
+                padding: 4px 10px;
+            }
+            QPushButton:hover {
+                background-color: #ff6b6b;
+                color: white !important;
+            }
+        """)
+        
+        attached_files_main_layout.addWidget(self.clear_all_btn)
+        layout.addWidget(self.attached_files_widget)
+        
         # Input area
         input_layout = QHBoxLayout()
-        self.input_field = QLineEdit()
-        self.input_field.setPlaceholderText("Type your message...")
-        self.input_field.returnPressed.connect(self.send_message)
+        self.input_field = MultilineInput()
+        self.input_field.send_message.connect(self.send_message)
         
         self.send_button = QPushButton("Send")
         self.send_button.clicked.connect(self.send_message)
         
         input_layout.addWidget(self.input_field)
-        input_layout.addWidget(self.send_button)
+        input_layout.addWidget(self.send_button, alignment=Qt.AlignmentFlag.AlignBottom)
         layout.addLayout(input_layout)
         
         # Store chat history
@@ -99,7 +290,7 @@ class ChatWindow(QWidget):
                 background-color: #1e1e1e;
                 color: #ffffff;
             }
-            QLineEdit {
+            QTextEdit {
                 background-color: #2d2d2d;
                 color: #ffffff;
                 border: 1px solid #3d3d3d;
@@ -224,10 +415,21 @@ class ChatWindow(QWidget):
     
     def send_message(self):
         """Send message from input field."""
-        text = self.input_field.text().strip()
+        text = self.input_field.toPlainText().strip()
+        
+        # Build message with file context if files are attached
+        if self.dropped_files:
+            file_context = "\n\n**Attached files/folders:**\n"
+            for path in self.dropped_files:
+                file_context += f"- `{path}`\n"
+            text = text + file_context if text else file_context.strip()
+        
         if text and self.parent_widget:
-            self.input_field.clear()
+            self.input_field.clear_text()
+            self.clear_attached_files()
             self.parent_widget.send_to_agent(text)
+            # Scroll with longer delay to ensure user message is fully rendered
+            QTimer.singleShot(100, self._do_scroll)
     
     def request_clear_chat(self):
         """Request parent to clear chat (both locally and on server) with confirmation."""
@@ -252,6 +454,117 @@ class ChatWindow(QWidget):
                 item.widget().deleteLater()
         self.current_ai_widget = None
         self.chat_history = []
+    
+    def dragEnterEvent(self, event):
+        """Handle drag enter event."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+    
+    def dragMoveEvent(self, event):
+        """Handle drag move event."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+    
+    def dropEvent(self, event):
+        """Handle drop event - extract file/folder paths."""
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            for url in urls:
+                if url.isLocalFile():
+                    path = url.toLocalFile()
+                    if path not in self.dropped_files:
+                        self.dropped_files.append(path)
+            
+            self.update_attached_files_display()
+            event.acceptProposedAction()
+    
+    def update_attached_files_display(self):
+        """Update the display of attached files with individual remove buttons."""
+        # Clear existing file widgets
+        while self.files_layout.count():
+            item = self.files_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        if self.dropped_files:
+            # Create a tag for each file
+            for path in self.dropped_files:
+                file_widget = QWidget()
+                file_layout = QHBoxLayout(file_widget)
+                file_layout.setContentsMargins(8, 2, 4, 2)
+                file_layout.setSpacing(4)
+                
+                # Icon and filename
+                if os.path.isdir(path):
+                    icon_text = "📁"
+                    name = os.path.basename(path) + "/"
+                else:
+                    icon_text = "�"
+                    name = os.path.basename(path)
+                
+                file_label = QLabel(f"{icon_text} {name}")
+                file_label.setStyleSheet("""
+                    QLabel {
+                        color: #d4d4d4;
+                        font-size: 11px;
+                        background-color: transparent;
+                    }
+                """)
+                file_label.setToolTip(path)
+                
+                # Remove button for this specific file - small and close
+                remove_btn = QPushButton("✖")
+                remove_btn.setFixedSize(14, 14)
+                remove_btn.setToolTip(f"Remove {name}")
+                remove_btn.clicked.connect(lambda checked, p=path: self.remove_file(p))
+                remove_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: transparent;
+                        color: #888888 !important;
+                        border: none;
+                        font-size: 9px;
+                        padding: 0px;
+                    }
+                    QPushButton:hover {
+                        color: #ff6b6b !important;
+                    }
+                """)
+                
+                file_layout.addWidget(file_label)
+                file_layout.addWidget(remove_btn)
+                
+                # Set fixed size policy to prevent stretching
+                file_widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+                file_widget.adjustSize()
+                
+                # Style the file widget as a compact chip
+                file_widget.setStyleSheet("""
+                    QWidget {
+                        background-color: #3d3d3d;
+                        border-radius: 10px;
+                    }
+                    QWidget:hover {
+                        background-color: #4d4d4d;
+                    }
+                """)
+                
+                # Add to flow layout
+                self.files_layout.addWidget(file_widget)
+            
+            self.attached_files_widget.show()
+        else:
+            self.attached_files_widget.hide()
+    
+    def remove_file(self, file_path):
+        """Remove a specific file from attached files."""
+        if file_path in self.dropped_files:
+            self.dropped_files.remove(file_path)
+            self.update_attached_files_display()
+    
+    def clear_attached_files(self):
+        """Clear all attached files."""
+        self.dropped_files.clear()
+        self.update_attached_files_display()
     
     def closeEvent(self, event):
         """Override close to just hide the window."""
