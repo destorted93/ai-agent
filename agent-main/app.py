@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import datetime
 from agent import Agent, AgentConfig
+from agent.agent import make_serializable
 
 from tools import (
     GetUserMemoriesTool,
@@ -279,6 +280,11 @@ def run_service(port=None):
     def health():
         return {"status": "ok", "service": config.SERVICE_NAME}
     
+    @app.get("/chat/history")
+    def get_chat_history():
+        """Get the current chat history."""
+        return {"history": chat_history_manager.get_history()}
+    
     @app.post("/chat/stream")
     async def chat_stream(request: ChatRequest):
         """Streaming chat endpoint - returns ALL events as SSE."""
@@ -291,7 +297,9 @@ def run_service(port=None):
                     handle_event(event, interactive_mode=False)
                     
                     # Stream ALL events to the client
-                    event_json = json.dumps(event, default=str)
+                    # Serialize the event properly (especially event.item objects)
+                    serialized_event = make_serializable(event)
+                    event_json = json.dumps(serialized_event, default=str)
                     yield f"data: {event_json}\n\n"
                 
                 yield "data: [DONE]\n\n"
