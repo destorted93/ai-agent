@@ -1,16 +1,16 @@
 import os
-from flask import Flask, request, jsonify
-from werkzeug.utils import secure_filename
 import io
-from openai import OpenAI
 import time
+import uvicorn
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi.responses import JSONResponse
+from openai import OpenAI
 
 from config import get_settings
 
-# Flask app
-app = Flask(__name__)
+# FastAPI app
+app = FastAPI()
 settings = get_settings()
-app.config["MAX_CONTENT_LENGTH"] = settings.MAX_CONTENT_LENGTH
 
 # OpenAI client (lazy-init so health works without key)
 _openai_client = None
@@ -28,50 +28,50 @@ def allowed_file(filename: str):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-@app.route("/health", methods=["GET"])  # simple health check
+@app.get("/health")  # simple health check
 def health():
-    return jsonify({"status": "ok", "service": settings.SERVICE_NAME})
+    return {"status": "ok", "service": settings.SERVICE_NAME}
 
 
-@app.route("/upload", methods=["POST"])
-def upload_and_transcribe():
+@app.post("/upload")
+async def upload_and_transcribe(
+    file: UploadFile = File(...),
+    language: str = Form("en")
+):
     t0 = time.perf_counter()
-    # Accept file under key 'file'
-    if "file" not in request.files:
-        return jsonify({"error": "Missing file field 'file'."}), 400
-
-    file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"error": "Empty filename."}), 400
+    
+    # Validate filename
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Empty filename.")
 
     if not allowed_file(file.filename):
-        return jsonify({"error": "Unsupported file type."}), 400
+        raise HTTPException(status_code=400, detail="Unsupported file type.")
 
-    # Size check: ensure the uploaded file doesn't exceed 25 MB
-    file.seek(0, os.SEEK_END)
-    size_bytes = file.tell()
-    file.seek(0)
-    if size_bytes > app.config["MAX_CONTENT_LENGTH"]:
-        return jsonify({
-            "error": "File too large.",
-            "limit_mb": app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024),
-            "size_mb": round(size_bytes / (1024 * 1024), 2),
-        }), 413
+    # Read file content
+    data = await file.read()
+    size_bytes = len(data)
+    
+    # Size check: ensure the uploaded file doesn't exceed limit
+    if size_bytes > settings.MAX_CONTENT_LENGTH:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "error": "File too large.",
+                "limit_mb": settings.MAX_CONTENT_LENGTH // (1024 * 1024),
+                "size_mb": round(size_bytes / (1024 * 1024), 2),
+            }
+        )
 
-    # Read optional language override (ISO-639-1)
-    lang = request.form.get("language", "en").lower()
+    # Validate language
+    lang = language.lower()
     allowed_langs = settings.ALLOWED_LANGS
     if lang not in allowed_langs:
         lang = "en"
 
-    # Read the file content in-memory
-    filename = secure_filename(file.filename)
-    data = file.read()
-
     try:
         # Call OpenAI transcription with in-memory bytes
         audio_file = io.BytesIO(data)
-        audio_file.name = filename  # hint to SDK about file type
+        audio_file.name = file.filename  # hint to SDK about file type
         t_oa0 = time.perf_counter()
         transcription = get_openai_client().audio.transcriptions.create(
             model="gpt-4o-transcribe",
@@ -86,36 +86,25 @@ def upload_and_transcribe():
 
         text = getattr(transcription, "text", None)
         if not text:
-            return jsonify({"error": "No text returned from transcription."}), 502
+            raise HTTPException(status_code=502, detail="No text returned from transcription.")
 
         t1 = time.perf_counter()
-        return jsonify({
+        return {
             "text": text,
-            "filename": filename,
+            "filename": file.filename,
             "language": lang,
             "metrics": {
                 "openai_ms": int((t_oa1 - t_oa0) * 1000),
                 "total_ms": int((t1 - t0) * 1000),
             },
-        })
+        }
+    except HTTPException:
+        raise
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        pass
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
     # Bind to all interfaces by default for microservice usage
     port = int(os.environ.get("PORT", settings.PORT))
-    app.run(host="0.0.0.0", port=port, debug=settings.DEBUG, threaded=True)
-
-# Return JSON on payload-too-large errors triggered by MAX_CONTENT_LENGTH
-@app.errorhandler(413)
-def too_large(_):
-    return (
-        jsonify({
-            "error": "Request payload too large.",
-            "limit_mb": app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024),
-        }),
-        413,
-    )
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")

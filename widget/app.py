@@ -1,17 +1,18 @@
 import os
-from flask import Flask, jsonify
+import uvicorn
+from fastapi import FastAPI
 
 from config import get_settings
 
-app = Flask(__name__)
+app = FastAPI()
 settings = get_settings()
 
 
-@app.route('/health', methods=['GET'])
+@app.get('/health')
 def health():
-    return jsonify({'status': 'ok', 'service': settings.SERVICE_NAME})
+    return {'status': 'ok', 'service': settings.SERVICE_NAME}
 
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', settings.PORT))
-    app.run(host='0.0.0.0', port=port, debug=settings.DEBUG, threaded=True)
+    uvicorn.run(app, host='0.0.0.0', port=port, log_level='info')

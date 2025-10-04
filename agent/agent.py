@@ -22,7 +22,14 @@ class Agent:
         # Use config's system prompt (supports custom template modifications)
         self.instructions = self.config.get_system_prompt(self.name)
         self.tool_schemas = [tool.schema for tool in self.tools]
-        self.token_usage = {}
+        self.token_usage = {
+            "iteration": 1,
+            "input_tokens": 0,
+            "cached_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_tokens": 0,
+            "total_tokens": 0
+        }
         self.token_usage_history = {}
         self.function_call_detected = False
         self.iteration = 1
