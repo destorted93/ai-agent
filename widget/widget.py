@@ -26,6 +26,42 @@ class ChatWindow(QWidget):
         
         # Chat display area
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # Top toolbar with clear button
+        toolbar = QWidget()
+        toolbar.setStyleSheet("""
+            QWidget {
+                background-color: #2d2d2d;
+                border-bottom: 1px solid #3d3d3d;
+            }
+        """)
+        toolbar_layout = QHBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(10, 5, 10, 5)
+        toolbar_layout.addStretch()
+        
+        self.clear_button = QPushButton("🗑️")
+        self.clear_button.setToolTip("Clear Chat History")
+        self.clear_button.setFixedSize(32, 32)
+        self.clear_button.clicked.connect(self.request_clear_chat)
+        self.clear_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #888888 !important;
+                border: none;
+                border-radius: 5px;
+                font-size: 18px;
+                padding: 0px;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                color: #ff6b6b !important;
+            }
+        """)
+        
+        toolbar_layout.addWidget(self.clear_button)
+        layout.addWidget(toolbar)
         
         # Scrollable chat display
         scroll = QScrollArea()
@@ -193,8 +229,23 @@ class ChatWindow(QWidget):
             self.input_field.clear()
             self.parent_widget.send_to_agent(text)
     
+    def request_clear_chat(self):
+        """Request parent to clear chat (both locally and on server) with confirmation."""
+        from PyQt6.QtWidgets import QMessageBox
+        
+        reply = QMessageBox.question(
+            self,
+            'Clear Chat History',
+            'Are you sure you want to clear all chat history?\n\nThis action cannot be undone.',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes and self.parent_widget:
+            self.parent_widget.clear_chat_all()
+    
     def clear_chat(self):
-        """Clear all chat messages."""
+        """Clear all chat messages from UI."""
         while self.chat_layout.count():
             item = self.chat_layout.takeAt(0)
             if item.widget():
@@ -212,6 +263,7 @@ class Gadget(QWidget):
     # Signals for thread-safe UI updates
     history_loaded = pyqtSignal(list)
     agent_event_received = pyqtSignal(dict)
+    transcription_received = pyqtSignal(str)
     
     def __init__(self):
         super().__init__()
@@ -232,6 +284,7 @@ class Gadget(QWidget):
         # Connect signals to slots for thread-safe UI updates
         self.history_loaded.connect(self.display_chat_history)
         self.agent_event_received.connect(self.handle_agent_event)
+        self.transcription_received.connect(self.send_to_agent)
 
         # Transparent, always-on-top window
         self.setWindowFlags(
@@ -411,6 +464,11 @@ class Gadget(QWidget):
         menu.addMenu(lang_menu)
 
         menu.addSeparator()
+        clear_chat_action = QAction("Clear Chat History", self)
+        clear_chat_action.triggered.connect(self.clear_chat_all)
+        menu.addAction(clear_chat_action)
+        
+        menu.addSeparator()
         close_action = QAction("Close", self)
         close_action.triggered.connect(self.quit_app)
         menu.addAction(close_action)
@@ -540,6 +598,25 @@ class Gadget(QWidget):
         # Force container update
         self.chat_window.chat_container.updateGeometry()
         self.chat_window.update()
+    
+    def clear_chat_all(self):
+        """Clear chat history both locally and on the server."""
+        # Clear local UI
+        if self.chat_window:
+            self.chat_window.clear_chat()
+        
+        # Send request to server to clear history
+        def _clear_on_server():
+            try:
+                response = requests.delete(f"{self.agent_url}/chat/history", timeout=5)
+                if response.status_code == 200:
+                    print("Chat history cleared on server")
+                else:
+                    print(f"Failed to clear chat history on server: {response.status_code}")
+            except Exception as e:
+                print(f"Failed to clear chat history on server: {e}")
+        
+        threading.Thread(target=_clear_on_server, daemon=True).start()
     
     def send_to_agent(self, text):
         """Send text to the agent service and handle streaming response."""
@@ -785,7 +862,8 @@ class Gadget(QWidget):
                 if isinstance(data, dict) and "text" in data:
                     transcribed_text = data["text"]
                     if transcribed_text and self.chat_window and self.chat_window.isVisible():
-                        self.send_to_agent(transcribed_text)
+                        # Use signal to call send_to_agent on main thread
+                        self.transcription_received.emit(transcribed_text)
                 
             except Exception as e:
                 print("Upload failed:", e)

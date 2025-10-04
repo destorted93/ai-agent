@@ -285,6 +285,17 @@ def run_service(port=None):
         """Get the current chat history."""
         return {"history": chat_history_manager.get_history()}
     
+    @app.delete("/chat/history")
+    def clear_chat_history():
+        """Clear the chat history."""
+        try:
+            chat_history_manager.clear_history()
+            chat_history_manager.clear_generated_images()
+            todo_manager.clear_todos()
+            return {"status": "ok", "message": "Chat history cleared"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    
     @app.post("/chat/stream")
     async def chat_stream(request: ChatRequest):
         """Streaming chat endpoint - returns ALL events as SSE."""
