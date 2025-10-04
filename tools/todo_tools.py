@@ -117,8 +117,9 @@ class GetTodosTool:
         "type": "function",
         "name": "get_todos",
         "description": (
-            "Retrieve the current ordered to-do items (id, date, time, text, status). Call before: (a) creating a new to-do batch; (b) revising/deleting items when state may have changed; always re-fetch after deletion. "
-            "Use to synchronize internal reasoning with persisted to-do state so you never act on stale assumptions."
+            "Retrieve the current ordered to-do items (id, date, time, text, status). Context gathering is sacred: ALWAYS call before creating new todos, before revising/deleting items, and always re-fetch after deletion. "
+            "This synchronizes your reasoning with actual persisted state, preventing mistakes from stale assumptions. "
+            "Part of your self-review loop: check todos periodically to verify alignment with current task progress."
         ),
         "strict": True,
         "parameters": {
@@ -140,7 +141,8 @@ class CreateTodoTool:
         "name": "create_todo",
         "description": (
             "Add one or more atomic to-do items. Provide an ordered list of item texts (each one executable without further decomposition). "
-            "Call only after inspecting existing items with get_todos and only for items not already present. Newly created items start with status='new'."
+            "Think before creating: only add todos for genuinely complex tasks requiring checkpoints. Each todo must be a clear, actionable step. "
+            "Context first: ALWAYS call get_todos before creating to avoid duplicates and ensure clean state. Newly created items start with status='new'."
         ),
         "strict": True,
         "parameters": {
@@ -171,7 +173,8 @@ class UpdateTodoTool:
         "type": "function",
         "name": "update_todo",
         "description": (
-            "Revise existing to-do items or mark them complete. Typical usage: after executing an item, set status='done'. You may also refine the wording of future items to reflect new context. "
+            "Revise existing to-do items or mark them complete. Core usage: after executing a step, mark status='done' to track progress. "
+            "During your self-review loop, you may also refine wording of pending items if new context emerges or if you spot mistakes in planning. "
             "Provide a list of entries each with an 'id' plus optional 'text' and/or 'status'. If a provider requires sending all fields, resend unchanged text/status values."
         ),
         "strict": True,
@@ -212,7 +215,8 @@ class DeleteTodoTool:
         "type": "function",
         "name": "delete_todo",
         "description": (
-            "Remove obsolete or superseded to-do items by id. Use this when re-prioritization makes certain items irrelevant, or after splitting/merging items. Remaining items are re-numbered consecutively starting at 1—always re-fetch with get_todos after deletion before further updates."
+            "Remove obsolete or superseded to-do items by id. Use when your self-review loop reveals items are no longer relevant, or when plan adjustments make steps unnecessary. "
+            "Think before deleting: ensure items are truly obsolete, not just challenging. Remaining items are re-numbered consecutively starting at 1 - always re-fetch with get_todos after deletion before further updates."
         ),
         "strict": True,
         "parameters": {
@@ -240,7 +244,8 @@ class ClearTodosTool:
         "type": "function",
         "name": "clear_todos",
         "description": (
-            "Delete all to-do items. Use when switching to a new, unrelated task or when resetting planning."
+            "Delete all to-do items at once. Use when switching to a completely unrelated task, after task completion cleanup, or when starting fresh planning. "
+            "Think before clearing: only use when genuinely starting over, not during minor plan adjustments."
         ),
         "strict": True,
         "parameters": {

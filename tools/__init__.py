@@ -22,6 +22,10 @@ from .filesystem_tools import (
     InsertTextInFileTool,
     ReplaceTextInFileTool,
     SearchInFileTool,
+    CopyPathsTool,
+    RenamePathTool,
+    MovePathsTool,
+    PathStatTool,
 )
 
 from .document_tools import CreateWordDocumentTool
@@ -42,6 +46,10 @@ __all__ = [
     'InsertTextInFileTool',
     'ReplaceTextInFileTool',
     'SearchInFileTool',
+    'CopyPathsTool',
+    'RenamePathTool',
+    'MovePathsTool',
+    'PathStatTool',
     'CreateWordDocumentTool',
     'GetTodosTool',
     'CreateTodoTool',

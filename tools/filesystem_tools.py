@@ -838,3 +838,335 @@ class SearchInFileTool:
             }
         except Exception as e:
             return {"status": "error", "message": str(e)}
+
+
+# -----------------
+# New tools: copy, rename, move, path stat
+# -----------------
+
+class CopyPathsTool:
+    schema = {
+        "type": "function",
+        "name": "copy_paths",
+        "description": (
+            "Copy one or more files/folders to destination locations within the project workspace. "
+            "Safety: both source and destination must resolve inside the project root."
+        ),
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "src": {"type": "string", "description": "Source path relative to project root."},
+                            "dst": {"type": "string", "description": "Destination path relative to project root."}
+                        },
+                        "required": ["src", "dst"],
+                        "additionalProperties": False
+                    },
+                    "description": "List of copy operations (src -> dst)."
+                },
+                "overwrite": {"type": "boolean", "default": False, "description": "Overwrite/merge if destination exists."},
+                "preserve_metadata": {"type": "boolean", "default": True, "description": "Preserve file metadata where possible."}
+            },
+            "required": ["items", "overwrite", "preserve_metadata"],
+            "additionalProperties": False,
+        },
+    }
+
+    def __init__(self, root_path):
+        self.root_path = root_path
+
+    def _ensure_inside(self, abs_path: str, abs_root: str):
+        return abs_path.startswith(abs_root)
+
+    def run(self, items, overwrite=False, preserve_metadata=True):
+        if not isinstance(items, list) or not all(isinstance(x, dict) and 'src' in x and 'dst' in x for x in items):
+            return {"status": "error", "message": "'items' must be a list of {src,dst}."}
+        abs_root = os.path.abspath(self.root_path)
+        copied = []
+        errors = []
+        out_of_scope = []
+        not_found = []
+        invalid = []
+
+        copy_func = shutil.copy2 if preserve_metadata else shutil.copy
+
+        for spec in items:
+            src_rel = spec.get('src')
+            dst_rel = spec.get('dst')
+            if not src_rel or not dst_rel:
+                invalid.append(spec)
+                continue
+            src_abs = os.path.abspath(os.path.join(self.root_path, src_rel))
+            dst_abs = os.path.abspath(os.path.join(self.root_path, dst_rel))
+
+            if not self._ensure_inside(src_abs, abs_root) or not self._ensure_inside(dst_abs, abs_root):
+                out_of_scope.append({"src": src_rel, "dst": dst_rel})
+                continue
+            if not (os.path.exists(src_abs)):
+                not_found.append(src_rel)
+                continue
+            if src_abs == abs_root:
+                invalid.append({"src": src_rel, "dst": dst_rel})
+                continue
+
+            # If destination is an existing directory, place inside using src basename
+            final_dst = dst_abs
+            if os.path.isdir(dst_abs):
+                final_dst = os.path.join(dst_abs, os.path.basename(src_abs))
+
+            try:
+                os.makedirs(os.path.dirname(final_dst), exist_ok=True)
+                if os.path.isfile(src_abs) or os.path.islink(src_abs):
+                    if os.path.exists(final_dst) and not overwrite:
+                        raise FileExistsError(f"Destination exists: {dst_rel}")
+                    copy_func(src_abs, final_dst)
+                    copied.append({"src": src_rel, "dst": os.path.relpath(final_dst, self.root_path), "type": "file"})
+                elif os.path.isdir(src_abs):
+                    # If final dst exists and is a file, error
+                    if os.path.isfile(final_dst):
+                        raise FileExistsError(f"Destination is a file: {dst_rel}")
+                    # Merge or create
+                    shutil.copytree(src_abs, final_dst, dirs_exist_ok=bool(overwrite), copy_function=copy_func)
+                    copied.append({"src": src_rel, "dst": os.path.relpath(final_dst, self.root_path), "type": "dir"})
+                else:
+                    not_found.append(src_rel)
+            except Exception as e:
+                errors.append({"src": src_rel, "dst": dst_rel, "error": str(e)})
+
+        status = "success" if not errors else "error"
+        msg_bits = []
+        if copied:
+            msg_bits.append(f"Copied {len(copied)} item(s).")
+        if not_found:
+            msg_bits.append(f"Not found: {len(not_found)}")
+        if out_of_scope:
+            msg_bits.append(f"Out of scope: {len(out_of_scope)}")
+        if invalid:
+            msg_bits.append(f"Invalid: {len(invalid)}")
+        if errors:
+            msg_bits.append(f"Errors: {len(errors)}")
+        return {
+            "status": status,
+            "message": " ".join(msg_bits) or "No action taken.",
+            "copied": copied,
+            "not_found": not_found,
+            "out_of_scope": out_of_scope,
+            "invalid": invalid,
+            "errors": errors,
+        }
+
+
+class RenamePathTool:
+    schema = {
+        "type": "function",
+        "name": "rename_path",
+        "description": (
+            "Rename (or move) a file/folder to a new path within the project workspace. "
+            "Optionally overwrite if destination exists."
+        ),
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "src": {"type": "string", "description": "Source path relative to project root."},
+                "dst": {"type": "string", "description": "Destination path relative to project root."},
+                "overwrite": {"type": "boolean", "default": False, "description": "Overwrite destination if it exists."}
+            },
+            "required": ["src", "dst", "overwrite"],
+            "additionalProperties": False,
+        },
+    }
+
+    def __init__(self, root_path):
+        self.root_path = root_path
+
+    def run(self, src, dst, overwrite=False):
+        abs_root = os.path.abspath(self.root_path)
+        src_abs = os.path.abspath(os.path.join(self.root_path, src))
+        dst_abs = os.path.abspath(os.path.join(self.root_path, dst))
+        if not src_abs.startswith(abs_root) or not dst_abs.startswith(abs_root):
+            return {"status": "error", "message": "Source/destination outside project scope."}
+        if not os.path.exists(src_abs):
+            return {"status": "error", "message": "Source not found."}
+        if dst_abs == abs_root or src_abs == abs_root:
+            return {"status": "error", "message": "Invalid path: root is not a valid operand."}
+        os.makedirs(os.path.dirname(dst_abs), exist_ok=True)
+        try:
+            if os.path.exists(dst_abs):
+                if not overwrite:
+                    return {"status": "error", "message": "Destination exists and overwrite=False."}
+                # Remove existing destination first
+                if os.path.isdir(dst_abs) and not os.path.islink(dst_abs):
+                    shutil.rmtree(dst_abs)
+                else:
+                    os.remove(dst_abs)
+            # Use shutil.move to handle cross-device safely
+            shutil.move(src_abs, dst_abs)
+            return {"status": "success", "message": f"Renamed '{src}' -> '{dst}'."}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+
+class MovePathsTool:
+    schema = {
+        "type": "function",
+        "name": "move_paths",
+        "description": (
+            "Move one or more files/folders to new locations within the project workspace. "
+            "Safety: both ends must be inside root; can overwrite if enabled."
+        ),
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "src": {"type": "string"},
+                            "dst": {"type": "string"}
+                        },
+                        "required": ["src", "dst"],
+                        "additionalProperties": False
+                    },
+                    "description": "List of move operations (src -> dst)."
+                },
+                "overwrite": {"type": "boolean", "default": False}
+            },
+            "required": ["items", "overwrite"],
+            "additionalProperties": False,
+        },
+    }
+
+    def __init__(self, root_path):
+        self.root_path = root_path
+
+    def run(self, items, overwrite=False):
+        abs_root = os.path.abspath(self.root_path)
+        moved = []
+        errors = []
+        out_of_scope = []
+        not_found = []
+        invalid = []
+        for spec in items:
+            if not isinstance(spec, dict) or 'src' not in spec or 'dst' not in spec:
+                invalid.append(spec)
+                continue
+            src = spec['src']
+            dst = spec['dst']
+            src_abs = os.path.abspath(os.path.join(self.root_path, src))
+            dst_abs = os.path.abspath(os.path.join(self.root_path, dst))
+            if not src_abs.startswith(abs_root) or not dst_abs.startswith(abs_root):
+                out_of_scope.append({"src": src, "dst": dst})
+                continue
+            if not os.path.exists(src_abs):
+                not_found.append(src)
+                continue
+            if dst_abs == abs_root or src_abs == abs_root:
+                invalid.append({"src": src, "dst": dst})
+                continue
+            try:
+                os.makedirs(os.path.dirname(dst_abs), exist_ok=True)
+                if os.path.exists(dst_abs):
+                    if not overwrite:
+                        raise FileExistsError(f"Destination exists: {dst}")
+                    if os.path.isdir(dst_abs) and not os.path.islink(dst_abs):
+                        shutil.rmtree(dst_abs)
+                    else:
+                        os.remove(dst_abs)
+                shutil.move(src_abs, dst_abs)
+                moved.append({"src": src, "dst": dst})
+            except Exception as e:
+                errors.append({"src": src, "dst": dst, "error": str(e)})
+        status = "success" if not errors else "error"
+        msg_bits = []
+        if moved:
+            msg_bits.append(f"Moved {len(moved)} item(s).")
+        if not_found:
+            msg_bits.append(f"Not found: {len(not_found)}")
+        if out_of_scope:
+            msg_bits.append(f"Out of scope: {len(out_of_scope)}")
+        if invalid:
+            msg_bits.append(f"Invalid: {len(invalid)}")
+        if errors:
+            msg_bits.append(f"Errors: {len(errors)}")
+        return {
+            "status": status,
+            "message": " ".join(msg_bits) or "No action taken.",
+            "moved": moved,
+            "not_found": not_found,
+            "out_of_scope": out_of_scope,
+            "invalid": invalid,
+            "errors": errors,
+        }
+
+
+class PathStatTool:
+    schema = {
+        "type": "function",
+        "name": "path_stat",
+        "description": (
+            "Return existence, type, size (for files), and mtime for a path relative to project root. "
+            "Optionally include SHA-256 for files."
+        ),
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "relative_path": {"type": "string"},
+                "with_hash": {"type": "boolean", "default": False}
+            },
+            "required": ["relative_path", "with_hash"],
+            "additionalProperties": False,
+        },
+    }
+
+    def __init__(self, root_path):
+        self.root_path = root_path
+
+    def _file_sha256(self, abs_path: str) -> str:
+        h = hashlib.sha256()
+        with open(abs_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                h.update(chunk)
+        return h.hexdigest()
+
+    def run(self, relative_path, with_hash=False):
+        abs_root = os.path.abspath(self.root_path)
+        abs_path = os.path.abspath(os.path.join(self.root_path, relative_path))
+        if not abs_path.startswith(abs_root):
+            return {"status": "error", "message": "Path is outside the project scope."}
+        out = {"status": "success", "exists": os.path.exists(abs_path)}
+        if not out["exists"]:
+            out.update({"type": "missing"})
+            return out
+        is_link = os.path.islink(abs_path)
+        if os.path.isfile(abs_path) or (is_link and not os.path.isdir(abs_path)):
+            stat = os.stat(abs_path, follow_symlinks=False)
+            out.update({
+                "type": "file",
+                "size": stat.st_size,
+                "mtime": stat.st_mtime,
+                "is_symlink": is_link,
+            })
+            if with_hash:
+                try:
+                    out["sha256"] = self._file_sha256(abs_path)
+                except Exception as e:
+                    out["sha256_error"] = str(e)
+        elif os.path.isdir(abs_path):
+            stat = os.stat(abs_path, follow_symlinks=False)
+            out.update({
+                "type": "dir",
+                "mtime": stat.st_mtime,
+                "is_symlink": is_link,
+            })
+        else:
+            out.update({"type": "other"})
+        return out

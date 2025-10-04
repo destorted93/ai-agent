@@ -6,8 +6,9 @@ class GetUserMemoriesTool:
         "type": "function",
         "name": "get_user_memories",
         "description": (
-            "Retrieve the user's long-term and emotional memories. Entries are concise (typically 50–150 characters) and include important facts, preferences, explicit requests, ideas, and patterns over past interactions. "
-            "Use at session start, when uncertain about the user, or to refresh current memories."
+            "Retrieve the user's long-term and emotional memories. Entries are concise (typically 50-150 characters) and include important facts, preferences, explicit requests, ideas, and patterns over past interactions. "
+            "ALWAYS call silently at conversation start to understand user context. Re-call when uncertain about user preferences or when context has shifted. "
+            "Context gathering is the foundation of good reasoning."
         ),
         "strict": True,
         "parameters": {
@@ -28,8 +29,9 @@ class CreateUserMemoryTool:
         "name": "create_user_memory",
         "description": (
             "Create one or more memory entries for the user. Each text becomes a separate memory. "
-            "Use only for durable facts: preferences, goals, constraints, ongoing projects, repeatable workflows, strong dislikes, or explicit 'remember this' requests. "
-            "Format: English; one line; start with 'User ...'; one fact per memory; aim for 50–150 characters. "
+            "Use ONLY for durable, valuable facts: preferences, goals, constraints, ongoing projects, repeatable workflows, strong dislikes, or explicit 'remember this' requests. "
+            "Think before storing: is this truly worth remembering long-term? Avoid storing temporary context or transient details. "
+            "Format: English; one line; start with 'User ...'; one fact per memory; aim for 50-150 characters. "
             "Never store secrets (passwords, credit cards, IDs, API keys). Avoid duplication and spam. Prefer precision over verbosity."
         ),
         "strict": True,
@@ -60,8 +62,9 @@ class UpdateUserMemoryTool:
         "type": "function",
         "name": "update_user_memory",
         "description": (
-            "Update existing user memories. Use only for necessary corrections or clarity improvements, or when the user requests changes. "
-            "Updated text must follow all memory rules: English, one line, start with 'User ...', one fact, 50–150 characters, no secrets, no duplicates."
+            "Update existing user memories. Use when you discover a mistake in stored information, when facts evolve, or when the user explicitly requests changes. "
+            "Part of your self-review loop: periodically check if stored memories remain accurate and refine them thoughtfully. "
+            "Updated text must follow all memory rules: English, one line, start with 'User ...', one fact, 50-150 characters, no secrets, no duplicates."
         ),
         "strict": True,
         "parameters": {
@@ -99,8 +102,9 @@ class DeleteUserMemoryTool:
         "type": "function",
         "name": "delete_user_memory",
         "description": (
-            "Delete one or more existing user memories by id. Use for explicit user requests or irreconcilable conflicts/outdated info. "
-            "After successful deletion, remaining memory ids are re-numbered starting at 1. Avoid deleting still-valuable memories."
+            "Delete one or more existing user memories by id. Use for explicit user requests, irreconcilable conflicts, or clearly outdated info. "
+            "Part of maintaining memory quality: if during your review loop you identify memories that are no longer relevant or accurate, clean them up. "
+            "After successful deletion, remaining memory ids are re-numbered starting at 1. Think before deleting - only remove genuinely obsolete entries."
         ),
         "strict": True,
         "parameters": {
