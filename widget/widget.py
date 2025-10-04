@@ -494,11 +494,46 @@ class Gadget(QWidget):
         if self.chat_window.isVisible():
             self.chat_window.hide()
         else:
+            # Position chat window above the widget
+            self.position_chat_window()
             self.chat_window.show()
             self.chat_window.raise_()
             self.chat_window.activateWindow()
             # Fetch chat history when opening
             self.fetch_and_display_chat_history()
+    
+    def position_chat_window(self):
+        """Position chat window centered above the widget."""
+        if not self.chat_window:
+            return
+        
+        # Get widget geometry
+        widget_rect = self.frameGeometry()
+        widget_x = widget_rect.x()
+        widget_y = widget_rect.y()
+        widget_width = widget_rect.width()
+        
+        # Get chat window size
+        chat_width = self.chat_window.width()
+        chat_height = self.chat_window.height()
+        
+        # Get screen geometry
+        screen = QApplication.primaryScreen().availableGeometry()
+        
+        # Calculate position: centered horizontally with widget, above it
+        chat_x = widget_x + (widget_width - chat_width) // 2
+        chat_y = widget_y - chat_height - 10  # 10px gap above widget
+        
+        # Ensure chat window stays within screen bounds
+        if chat_x < screen.x():
+            chat_x = screen.x() + 10
+        elif chat_x + chat_width > screen.x() + screen.width():
+            chat_x = screen.x() + screen.width() - chat_width - 10
+        
+        if chat_y < screen.y():
+            chat_y = screen.y() + 10
+        
+        self.chat_window.move(chat_x, chat_y)
     
     def fetch_and_display_chat_history(self):
         """Fetch chat history from agent service and display it."""
