@@ -1,5 +1,6 @@
 import sys
 import os
+import asyncio
 
 # Add parent directory to path so we can import agent, tools, etc.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -262,8 +263,7 @@ def run_service(port=None):
     """Run as FastAPI service."""
     if port is None:
         port = config.DEFAULT_PORT
-    from fastapi import FastAPI, HTTPException
-    from fastapi.responses import StreamingResponse
+    from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
     from pydantic import BaseModel
     import uvicorn
     
@@ -296,38 +296,66 @@ def run_service(port=None):
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     
-    @app.post("/chat/stream")
-    async def chat_stream(request: ChatRequest):
-        """Streaming chat endpoint - returns ALL events as SSE."""
+    @app.websocket("/chat/ws")
+    async def chat_websocket(websocket: WebSocket):
+        """WebSocket endpoint for streaming chat."""
+        await websocket.accept()
+        
         try:
-            async def event_generator():
-                stream = process_message(request.message, request.max_turns)
+            while True:
+                # Receive message from client
+                data = await websocket.receive_json()
+                message = data.get("message", "")
+                max_turns = data.get("max_turns", config.MAX_TURNS)
                 
-                for event in stream:
-                    # Handle the event (saves history, images, etc.)
-                    handle_event(event, interactive_mode=False)
+                if not message:
+                    await websocket.send_json({"type": "error", "message": "Empty message"})
+                    continue
+                
+                try:
+                    # Process the message and stream events
+                    # Use asyncio to avoid blocking the event loop
+                    stream = process_message(message, max_turns)
                     
-                    # Stream ALL events to the client
-                    # Serialize the event properly (especially event.item objects)
-                    serialized_event = make_serializable(event)
-                    event_json = json.dumps(serialized_event, default=str)
-                    yield f"data: {event_json}\n\n"
-                
-                yield "data: [DONE]\n\n"
-            
-            return StreamingResponse(
-                event_generator(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                }
-            )
+                    # Iterate through events and yield control to event loop
+                    for event in stream:
+                        # Handle the event (saves history, images, etc.)
+                        handle_event(event, interactive_mode=False)
+                        
+                        # Stream event to client
+                        serialized_event = make_serializable(event)
+                        await websocket.send_json(serialized_event)
+                        
+                        # Yield control to event loop to handle ping/pong
+                        await asyncio.sleep(0)
+                    
+                    # Send completion signal
+                    await websocket.send_json({"type": "stream.finished"})
+                    
+                except Exception as e:
+                    print(f"Error processing message: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": f"Error processing message: {str(e)}"
+                    })
+                    await websocket.send_json({"type": "stream.finished"})
+                    
+        except WebSocketDisconnect:
+            print("WebSocket client disconnected")
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            print(f"WebSocket error: {e}")
+            import traceback
+            traceback.print_exc()
+            try:
+                await websocket.close()
+            except:
+                pass
     
     print(color_text(f"Starting agent service on port {port}...", '36'))
     print(color_text(f"API docs: http://localhost:{port}/docs", '33'))
+    print(color_text(f"WebSocket endpoint: ws://localhost:{port}/chat/ws", '33'))
     
     uvicorn.run(app, host="0.0.0.0", port=port)
 

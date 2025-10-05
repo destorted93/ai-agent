@@ -9,6 +9,9 @@ import io
 import time
 import threading
 import json
+import asyncio
+import websockets
+import traceback
 from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton, QVBoxLayout, 
                               QHBoxLayout, QMenu, QTextEdit, QLineEdit, QScrollArea,
                               QLabel, QFrame, QSizePolicy, QLayout)
@@ -967,7 +970,7 @@ class Gadget(QWidget):
         threading.Thread(target=_clear_on_server, daemon=True).start()
     
     def send_to_agent(self, text):
-        """Send text to the agent service and handle streaming response."""
+        """Send text to the agent service and handle streaming response via WebSocket."""
         if not self.chat_window:
             return
         
@@ -978,42 +981,68 @@ class Gadget(QWidget):
         self.chat_window.start_ai_response()
         
         def _stream():
+            # Create new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
             try:
-                response = requests.post(
-                    f"{self.agent_url}/chat/stream",
-                    json={"message": text},
-                    stream=True,
-                    timeout=300
-                )
-                
-                for line in response.iter_lines():
-                    if line:
-                        line_str = line.decode('utf-8')
-                        if line_str.startswith('data: '):
-                            data_str = line_str[6:]
-                            if data_str == '[DONE]':
-                                break
-                            
-                            try:
-                                event = json.loads(data_str)
-                                # Emit signal instead of calling directly
-                                self.agent_event_received.emit(event)
-                            except json.JSONDecodeError as je:
-                                print(f"JSON decode error: {je}")
-                            except Exception as ee:
-                                print(f"Error processing event: {ee}")
+                loop.run_until_complete(self._websocket_stream(text))
             except Exception as e:
-                print(f"Error streaming from agent: {e}")
-                # Use signal for error display too
+                print(f"Error in websocket stream: {e}")
+                traceback.print_exc()
                 self.agent_event_received.emit({
                     "type": "error",
                     "message": f"Failed to communicate with agent: {e}"
                 })
-            finally:
-                # Use signal for finish
                 self.agent_event_received.emit({"type": "stream.finished"})
+            finally:
+                loop.close()
         
         threading.Thread(target=_stream, daemon=True).start()
+    
+    async def _websocket_stream(self, text):
+        """Handle WebSocket streaming communication."""
+        # Convert http:// to ws://
+        ws_url = self.agent_url.replace("http://", "ws://").replace("https://", "wss://")
+        ws_url = f"{ws_url}/chat/ws"
+        
+        try:
+            # Increase timeouts to handle long-running LLM operations
+            # ping_interval=None disables ping/pong to avoid timeout issues
+            async with websockets.connect(
+                ws_url, 
+                ping_interval=None,  # Disable automatic ping/pong
+                close_timeout=10
+            ) as websocket:
+                # Send message
+                await websocket.send(json.dumps({"message": text}))
+                
+                # Receive streaming events
+                async for message in websocket:
+                    try:
+                        event = json.loads(message)
+                        
+                        # Check for completion
+                        if event.get("type") == "stream.finished":
+                            self.agent_event_received.emit(event)
+                            break
+                        
+                        # Emit event to UI thread
+                        self.agent_event_received.emit(event)
+                        
+                    except json.JSONDecodeError as je:
+                        print(f"JSON decode error: {je}")
+                    except Exception as ee:
+                        print(f"Error processing event: {ee}")
+                        traceback.print_exc()
+                        
+        except websockets.exceptions.WebSocketException as e:
+            print(f"WebSocket error: {e}")
+            raise
+        except Exception as e:
+            print(f"Error in websocket stream: {e}")
+            traceback.print_exc()
+            raise
     
     @pyqtSlot(dict)
     def handle_agent_event(self, event):

@@ -5,3 +5,4 @@ sounddevice>=0.4.6
 requests>=2.32.0
 pydantic>=2.8.2
 pydantic-settings>=2.4.0
+websockets>=12.0
