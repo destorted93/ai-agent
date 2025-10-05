@@ -23,7 +23,7 @@ class Agent:
         self.instructions = self.config.get_system_prompt(self.name)
         self.tool_schemas = [tool.schema for tool in self.tools]
         self.token_usage = {
-            "iteration": 1,
+            "turn": 1,
             "input_tokens": 0,
             "cached_tokens": 0,
             "output_tokens": 0,
@@ -32,7 +32,7 @@ class Agent:
         }
         self.token_usage_history = {}
         self.function_call_detected = False
-        self.iteration = 1
+        self.turn = 1
         self.chat_history_during_run = []  # per-run ephemeral history additions
         self.generated_images = []
 
@@ -43,15 +43,15 @@ class Agent:
         # Windows PowerShell supports ANSI escape codes in recent versions
         return f"\033[{color_code}m{text}\033[0m"
 
-    def run(self, input_messages=None, max_turns=16):
+    def run(self, message=None, input_messages=None, max_turns=16):
         self.chat_history_during_run = []
         self.function_call_detected = False
-        self.iteration = 1
+        self.turn = 1
         self._run_start_time = datetime.now()
 
-        # if messages None or is not string or is empty, return None
-        if input_messages is None:
-            yield{
+        # if messages or message None or is not string or is empty, return None
+        if input_messages is None or message is None or not isinstance(message, str) or not message.strip():
+            yield {
                 "type": "response.agent.done",
                 "message": "No user input provided or input is invalid.",
                 "duration_seconds": (datetime.now() - self._run_start_time).total_seconds(),
@@ -63,7 +63,7 @@ class Agent:
         # start the Agent loop
         while True:
             # Guard against runaway loops (SDK would raise MaxTurnsExceeded)
-            if self.iteration > max_turns:
+            if self.turn > max_turns:
                 yield {
                     "type": "response.agent.done",
                     "message": f"Max turns exceeded (max_turns={max_turns}).",
@@ -72,8 +72,8 @@ class Agent:
                     "generated_images": self.generated_images
                 }
                 return
-            # if this is not the first iteration and no function call was detected, break the agent loop
-            if self.iteration > 1 and not self.function_call_detected:
+            # if this is not the first turn and no function call was detected, break the agent loop
+            if self.turn > 1 and not self.function_call_detected:
                 yield {
                     "type": "response.agent.done",
                     "message": "Agent run completed without further user input or function calls.",
@@ -82,10 +82,14 @@ class Agent:
                     "generated_images": self.generated_images
                 }
                 return
-            elif self.iteration == 1:
-                self.chat_history_during_run = []
+            elif self.turn == 1:
+                user_message = {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": message}]
+                }
+                self.chat_history_during_run = [user_message]
 
-            # clear the function call detection flag for the next iteration
+            # clear the function call detection flag for the next turn
             self.function_call_detected = False
 
             # Effective settings come straight from the config object
@@ -148,17 +152,17 @@ class Agent:
                         yield {"type": "response.image_generation_call.completed", "data": event}
 
                     elif event.type == "response.completed":
-                        # Collect token usage for this iteration
+                        # Collect token usage for this turn
                         self.token_usage = {
-                            "iteration": self.iteration,
+                            "turn": self.turn,
                             "input_tokens": event.response.usage.input_tokens,
                             "cached_tokens": event.response.usage.input_tokens_details.cached_tokens,
                             "output_tokens": event.response.usage.output_tokens,
                             "reasoning_tokens": event.response.usage.output_tokens_details.reasoning_tokens,
                             "total_tokens": event.response.usage.total_tokens
                         }
-                        # Retain token usage for this iteration
-                        self.token_usage_history[self.iteration] = self.token_usage
+                        # Retain token usage for this turn
+                        self.token_usage_history[self.turn] = self.token_usage
 
                         # Append the AI agent output items to the chat history
                         for output_item in event.response.output:
@@ -253,7 +257,7 @@ class Agent:
                 }
                 return 
 
-            self.iteration += 1
+            self.turn += 1
 
 def make_serializable(obj):
     if hasattr(obj, '__dict__'):

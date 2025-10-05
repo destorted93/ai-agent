@@ -13,6 +13,13 @@ from .todo_tools import (
     ClearTodosTool,
 )
 
+from .history_tools import (
+    GetChatHistoryMetadataTool,
+    GetChatHistoryEntryTool,
+    DeleteChatHistoryEntriesTool,
+    GetChatHistoryStatsTool,
+)
+
 from .filesystem_tools import (
     ReadFolderContentTool,
     ReadFileContentTool,
@@ -38,6 +45,10 @@ __all__ = [
     'CreateUserMemoryTool',
     'UpdateUserMemoryTool',
     'DeleteUserMemoryTool',
+    'GetChatHistoryMetadataTool',
+    'GetChatHistoryEntryTool',
+    'DeleteChatHistoryEntriesTool',
+    'GetChatHistoryStatsTool',
     'ReadFolderContentTool',
     'ReadFileContentTool',
     'WriteFileContentTool',

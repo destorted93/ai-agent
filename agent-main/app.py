@@ -14,6 +14,10 @@ from tools import (
     CreateUserMemoryTool,
     UpdateUserMemoryTool,
     DeleteUserMemoryTool,
+    GetChatHistoryMetadataTool,
+    GetChatHistoryEntryTool,
+    DeleteChatHistoryEntriesTool,
+    GetChatHistoryStatsTool,
     GetTodosTool,
     CreateTodoTool,
     UpdateTodoTool,
@@ -87,6 +91,11 @@ def initialize_agent(load_history=True):
         CreateUserMemoryTool(),
         UpdateUserMemoryTool(),
         DeleteUserMemoryTool(),
+        # Chat History Management Tools (optional - uncomment to enable)
+        GetChatHistoryMetadataTool(),
+        GetChatHistoryEntryTool(),
+        DeleteChatHistoryEntriesTool(),
+        GetChatHistoryStatsTool(),
         GetTodosTool(),
         CreateTodoTool(),
         UpdateTodoTool(),
@@ -133,15 +142,16 @@ def process_message(user_input_text, max_turns=None):
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     formatted_input = f"> **Timestamp:** `{timestamp}`\nUser's input: {user_input_text}"
     
-    user_message = {
-        "role": "user",
-        "content": [{"type": "input_text", "text": formatted_input}]
-    }
+    # user_message = {
+    #     "role": "user",
+    #     "content": [{"type": "input_text", "text": formatted_input}]
+    # }
     
-    chat_history_manager.add_entry(user_message)
+    # chat_history_manager.add_entry(user_message)
     
     # Start the agent run
     stream = agent.run(
+        message=formatted_input,
         input_messages=chat_history_manager.get_history(),
         max_turns=max_turns,
     )
@@ -188,6 +198,10 @@ def handle_event(event, interactive_mode=True):
                 print(color_text(f"Completed image saved to {image_path}", '32'), flush=True)
     
     elif event["type"] == "response.agent.done":
+        # Reload history from file to respect any deletions/changes made during the run
+        chat_history_manager.history = chat_history_manager.load_history()
+        
+        # Append only the NEW entries from this agent run
         chat_history_manager.append_entries(event["chat_history"])
         chat_history_manager.save_history()
         chat_history_manager.add_generated_images(event["generated_images"])
