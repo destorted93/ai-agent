@@ -1,51 +1,59 @@
-# Transcribe Microservice
+# Transcribe Service
 
-A small Flask-based microservice that accepts audio uploads (WAV/MP3/M4A/OGG/FLAC), transcribes them using OpenAI's `gpt-4o-transcribe`, and returns the text as JSON.
+FastAPI service that converts audio to text using OpenAI Whisper.
 
-## API
+## What it does
 
-- `GET /health` → `{ "status": "ok" }`
-- `POST /upload` → multipart/form-data with `file` field containing the audio file. Returns:
+Receives audio files and returns transcribed text with timestamps.
 
+## Endpoints
+
+### `GET /health`
+Health check endpoint.
+
+### `POST /upload`
+Upload audio file for transcription.
+
+**Parameters**:
+- `file` - Audio file (WAV, MP3, M4A, OGG, FLAC, WebM)
+- `language` - Language code (default: `en`)
+
+**Response**:
 ```json
 {
-  "text": "...transcription...",
-  "filename": "recording.wav"
+  "text": "transcribed text",
+  "language": "en",
+  "duration": 1.23,
+  "processing_time_seconds": 0.45
 }
 ```
 
-Errors return JSON with `error` and an appropriate HTTP status code.
+## Configuration
 
-Size limits:
-- Max upload size is 25 MB. Requests larger than this return `413` with:
-  `{ "error": "Request payload too large.", "limit_mb": 25 }`
+Set in `config.py`:
+- `PORT` - Service port (default: 6000)
+- `ALLOWED_EXTENSIONS` - Supported audio formats
 
-## Setup
+## Running
 
-1. Create and activate a virtual environment (optional but recommended).
-2. Install dependencies:
-
-```
-pip install -r requirements.txt
+```bash
+python transcribe/app.py
 ```
 
-3. Set environment variables (PowerShell example):
-
-```
-$env:OPENAI_API_KEY = "sk-..."
-$env:PORT = 6001
-$env:SERVICE_NAME = "transcribe"
+Or via the launcher:
+```bash
+START.bat
 ```
 
-## Run
+## Dependencies
 
-```
-python app.py
-```
+- FastAPI
+- OpenAI Python SDK
+- uvicorn
 
-By default, the service listens on `0.0.0.0:6001`. You can override via `PORT`. Upload limit is controlled by `MAX_CONTENT_LENGTH_MB`.
+Install: `pip install -r transcribe/requirements.txt`
 
-## Notes
+## Integration
 
-- Ensure the calling client sends the audio file as multipart/form-data under key `file`.
+Used by the widget for voice-to-text conversion
 - The service processes audio in-memory (no disk writes).

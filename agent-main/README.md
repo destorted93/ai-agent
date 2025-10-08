@@ -1,67 +1,82 @@
 # Agent Main
 
-The main conversational AI agent with tool capabilities.
+Primary agent application with tool integration and dual operation modes.
 
-## Features
+## What it does
 
-- Interactive chat interface with chat history management
-- Memory system for persistent user information
-- Todo list management
-- File system operations (read, write, create, delete, search)
-- Web search capabilities
-- Image generation (optional)
-- Document creation (optional)
-- Terminal command execution (optional)
-- Data visualization tools (optional)
+The main conversational AI agent that:
+- Manages tools (filesystem, web, memory, todos, etc.)
+- Handles chat history and context
+- Supports both CLI and API modes
+- Integrates all services and capabilities
 
-## Installation
+## Operation Modes
 
-```bash
-pip install -r requirements.txt
-```
-
-## Usage
-
-Run the agent from the project root:
+### Interactive Mode (CLI)
+Direct terminal interaction with the agent.
 
 ```bash
-python agent-main/main.py
+python agent-main/app.py --mode interactive
 ```
 
-Or from within the agent-main directory:
+Features:
+- Type messages directly
+- See real-time streaming responses
+- Token usage tracking
+- Commands: `/clear`, `/stats`, `/quit`
+
+### Service Mode (API)
+Runs as FastAPI service for widget integration.
 
 ```bash
-cd agent-main
-python main.py
+python agent-main/app.py --mode service --port 6002
 ```
+
+Endpoints:
+- `POST /chat` - Send message, get streaming response
+- `POST /stop` - Interrupt current agent run
+- `GET /health` - Health check
+- WebSocket `/ws` - Real-time chat streaming
+
+## Integrated Tools
+
+- **Memory Management**: User context and preferences
+- **Chat History**: Conversation persistence
+- **Todo Management**: Task tracking
+- **Filesystem**: Read, write, search files
+- **Web Tools**: Search and scraping
+- **Document Creation**: Generate Word docs
+- **Visualization**: Create charts and plots
+- **Terminal**: Execute commands
+- **Image Generation**: AI-generated images
 
 ## Configuration
 
-The agent uses the following configuration:
-- Model: gpt-5
-- Temperature: 1.0
-- Reasoning effort: medium
-- Streaming: enabled
+Edit `config.py`:
+- `AGENT_NAME` - Agent identifier
+- `USER_ID` - User identifier
+- `OPENAI_API_KEY` - API key (or set env var)
 
-You can modify these settings in the `AgentConfig` initialization within `main.py`.
+## Running
 
-## Tools
+### Via Launcher (Recommended)
+```bash
+START.bat
+```
 
-The agent comes with various tools that can be enabled or disabled by commenting/uncommenting them in the `selected_tools` list:
+### Manual
+```bash
+# Interactive
+python agent-main/app.py --mode interactive
 
-- **Memory Tools**: Store and retrieve user information
-- **Todo Tools**: Manage task lists
-- **File System Tools**: Read, write, and manipulate files and folders
-- **Web Search**: Search the internet
-- **Image Generation**: Generate images (requires API access)
-- **Document Tools**: Create Word documents
-- **Visualization Tools**: Create plots and charts
-- **Terminal Tools**: Execute shell commands (use with caution)
+# Service
+python agent-main/app.py --mode service --port 6002
+```
 
-## Chat History
+## Dependencies
 
-On startup, you can choose to:
-- Load previous chat history (y/n)
-- Start fresh with cleared history and todos
+Install: `pip install -r agent-main/requirements.txt`
 
-Chat history is automatically saved after each interaction.
+## Integration
+
+Service mode is used by the widget for the desktop interface

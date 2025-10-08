@@ -1,53 +1,52 @@
-# Chat History Management System
+# Chat History Service
 
-## Overview
+Manages conversation history with the AI agent across sessions.
 
-The chat history system now uses a **wrapped format** that adds metadata to each conversation entry. This allows for better tracking, management, and selective deletion of chat history entries without breaking OpenAI API compatibility.
+## What it does
 
-## New Format Structure
+Persists entire conversation threads including:
+- User messages
+- Agent responses
+- Function calls and outputs
+- Generated images
+- Reasoning traces
 
-Each entry in `chat_history.json` is now wrapped with metadata:
+## Storage
+
+- **Chat History**: `chat_history.json`
+- **Generated Images**: `generated_images.json`
+
+## Entry Format
+
+Each entry is wrapped with metadata:
 
 ```json
 {
-  "id": "unique-uuid-here",
-  "ts": "2025-10-05T14:59:15.123456",
-  "type": "user",
+  "id": "uuid",
+  "ts": "2025-10-09T14:30:00",
+  "type": "text",
   "size": 1234,
-  "content": {
-    "role": "user",
-    "content": [
-      {"type": "input_text", "text": "User's message here"}
-    ]
-  }
+  "content": { ... }
 }
 ```
 
-### Metadata Fields
+## Features
 
-- **id**: Unique UUID for this entry (generated automatically)
-- **ts**: ISO 8601 timestamp when entry was created
-- **type**: Entry type (see below for list of types)
-- **size**: Size of the content in bytes
-- **content**: The original OpenAI message object (unchanged)
+- **Auto-load**: Previous conversations resume automatically
+- **Searchable**: Query history by metadata or content
+- **Stats**: Track conversation size and entry counts
+- **Cleanup**: Delete old or unwanted entries
 
-### Entry Types
+## Tools Available
 
-The `type` field reflects the actual content type, not the role:
+- `get_chat_history_metadata` - List all entries with metadata
+- `get_chat_history_entry` - Retrieve specific entry by ID
+- `delete_chat_history_entries` - Remove entries by ID
+- `get_chat_history_stats` - Get conversation statistics
 
-- **input_text**: User messages (role: user, content[0].type: input_text)
-- **output_text**: Assistant text responses (role: assistant, content[0].type: output_text)
-- **reasoning**: AI thinking process (type: reasoning at top level)
-- **function_call**: Tool/function calls (type: function_call at top level)
-- **function_call_output**: Tool/function results (type: function_call_output at top level)
-- **message**: Complete assistant message objects (type: message at top level)
+## Integration
 
-Note: We store types, not roles, because reasoning and function calls don't have roles.
-
-## Why This Design?
-
-1. **OpenAI Compatibility**: The `content` field remains exactly as OpenAI expects it
-2. **Tracking**: Each entry has a unique ID for reference and management
+Used by `agent-main/app.py` to maintain conversation context
 3. **Management**: Can selectively delete or analyze entries by ID
 4. **Analytics**: Track conversation size, types, and growth over time
 5. **Backwards Compatible**: Automatic migration from old format

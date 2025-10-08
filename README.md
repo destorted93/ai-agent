@@ -1,102 +1,149 @@
-# ai-agent
-General purpose AI Agent with OpenAI Python SDK
+# AI Agent
 
-## 🚀 One-Click Launch
+Desktop AI assistant with voice input, chat interface, and powerful tools.
 
-**Double-click `START.bat`** to launch everything you need:
-- Transcribe Service (voice-to-text)
-- Agent Service (AI chat)
-- Widget (desktop interface with chat window)
+## 🚀 Quick Start
 
-See [QUICKSTART.md](QUICKSTART.md) for detailed instructions.
+**Double-click `START.bat`** to launch everything:
+- 🎤 Transcribe Service (voice-to-text)
+- 🤖 Agent Service (AI brain)
+- 💬 Widget (desktop interface)
 
-## Project Structure
+That's it! The widget appears on your desktop ready to use.
 
-- **agent-main/** - Main conversational AI agent with tool capabilities and service mode
-- **agent/** - Core agent implementation with streaming support
-- **tools/** - Various tool implementations (filesystem, web, memory, todos, etc.)
-- **chat_history/** - Chat history management and persistence
-- **memory/** - Persistent memory system for user context
-- **transcribe/** - Audio transcription service using OpenAI Whisper (FastAPI)
-- **widget/** - Desktop widget with voice recording and chat window
-- **service-template/** - Template for creating new services
+## What it does
+
+A modular AI agent that:
+- Listens to your voice and transcribes it
+- Chats with you using GPT-4
+- Executes tasks through tools
+- Remembers context across sessions
+- Runs as separate services for stability
+
+## Architecture
+
+**Microservices** - Each component runs independently:
+
+### Core Services
+- **agent-main/** - Main AI agent (CLI + API modes)
+- **agent/** - Agent core (OpenAI wrapper with streaming)
+- **transcribe/** - Audio → text conversion
+- **widget/** - Desktop UI with voice/chat
+
+### Data & Tools
+- **chat_history/** - Conversation persistence
+- **memory/** - User context storage
+- **tools/** - Agent capabilities (filesystem, web, todos, etc.)
+
+### Utilities
+- **service-template/** - Boilerplate for new services
 
 ## Features
 
 ### 🎤 Voice Input
-- Record audio with desktop widget
-- Automatic transcription using OpenAI Whisper
-- Multi-language support (English, Romanian, Russian, German, French, Spanish)
+- Click to record
+- Auto-transcribe using Whisper
+- Multi-language support
 
-### 💬 Chat Window
-- Persistent chat interface with AI agent
+### 💬 Chat Interface
+- Type or speak your messages
 - Real-time streaming responses
-- Voice and text input support
-- Color-coded display (thinking, responses, function calls)
-- Chat history preserved across sessions
+- Color-coded output (thinking, responses, function calls)
+- Screenshot sharing
+- Persistent history
 
-### 🛠️ Tools & Capabilities
-- File system operations (read, write, search)
-- Web search and scraping
-- Memory management
-- Todo list management
-- Document creation
-- Data visualization
-- Terminal command execution
-
-## Quick Start
-
-### 🎯 Recommended: One-Click Launch
-
-Simply run:
-```bash
-START.bat
-```
-
-This launches all three services with proper configuration.
-
-### Alternative: Individual Components
-
-#### Main Agent (Interactive CLI)
-```bash
-python agent-main/app.py --mode interactive
-```
-
-#### Agent Service (API)
-```bash
-python agent-main/app.py --mode service --port 6002
-```
-
-#### Services (Transcribe + Agent + Widget)
-```bash
-run_services.bat [OPENAI_API_KEY]
-```
+### 🛠️ Agent Capabilities
+- **Files**: Read, write, search, edit
+- **Web**: Search and scrape
+- **Todos**: Task management
+- **Memory**: Remember user preferences
+- **Documents**: Create Word files
+- **Charts**: Generate visualizations
+- **Terminal**: Run commands
+- **Images**: AI image generation
 
 ## Installation
 
-### Quick Install (Recommended)
-
-Run the installer to set up all dependencies at once:
+### Option 1: Quick Install
 ```bash
 INSTALL.bat
 ```
 
-### Manual Install
-
-Each service has its own `requirements.txt`. Install dependencies as needed:
-
+### Option 2: Manual Install
 ```bash
-# For the main agent
 pip install -r agent-main/requirements.txt
-
-# For transcription service
 pip install -r transcribe/requirements.txt
-
-# For widget
 pip install -r widget/requirements.txt
 ```
 
-### Environment Setup
+## Running
+
+### Complete System (Recommended)
+```bash
+START.bat
+```
+
+### Individual Components
+```bash
+# Interactive CLI
+python agent-main/app.py --mode interactive
+
+# Agent API
+python agent-main/app.py --mode service --port 6002
+
+# Transcribe service
+python transcribe/app.py
+
+# Widget only
+python widget/widget.py
+```
+
+## Configuration
+
+Set your OpenAI API key:
+```bash
+# Windows
+$env:OPENAI_API_KEY = "sk-..."
+
+# Or edit config.py files
+```
+
+## Service Ports
+
+- **6000** - Transcribe service
+- **6002** - Agent service
+- Widget connects to both
+
+## Adding Features
+
+Each service has its own README with details:
+- `/agent-main/README.md` - Main agent docs
+- `/transcribe/README.md` - Transcription service
+- `/widget/README.md` - Desktop widget
+- `/tools/README.md` - Available tools
+
+## Project Layout
+
+```
+ai-agent/
+├── START.bat           # Launch everything
+├── INSTALL.bat         # Install dependencies
+├── agent-main/         # Main AI agent
+├── agent/              # Core agent logic
+├── transcribe/         # Voice-to-text service
+├── widget/             # Desktop interface
+├── tools/              # Agent tools
+├── chat_history/       # Conversation storage
+├── memory/             # User context
+└── service-template/   # New service boilerplate
+```
+
+## Why Microservices?
+
+- **Isolation**: One crash doesn't kill everything
+- **Resources**: Distribute load across processes
+- **Development**: Work on parts independently
+- **Scaling**: Add more services easily
 
 Set your OpenAI API key:
 ```powershell
