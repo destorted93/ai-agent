@@ -593,6 +593,20 @@ class Gadget(QWidget):
         # Language selection (ISO-639-1); default 'en'
         self.selected_language = "en"
         
+        # Long press state
+        self.press_start_time = None
+        self.long_press_threshold = 1000  # 1 second in milliseconds
+        self.long_press_timer = QTimer()
+        self.long_press_timer.setSingleShot(True)
+        self.long_press_timer.timeout.connect(self.on_long_press)
+        self.ready_to_record = False  # Indicates button held long enough, waiting for release
+        
+        # Animation state
+        self.recording_animation_timer = QTimer()
+        self.recording_animation_timer.timeout.connect(self.animate_recording)
+        self.animation_step = 0
+        self.animation_direction = 1  # 1 for growing, -1 for shrinking
+        
         # Chat window
         self.chat_window = None
         self.agent_url = os.environ.get("AGENT_URL", "http://127.0.0.1:6002")
@@ -613,76 +627,36 @@ class Gadget(QWidget):
         # --- Layout ---
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
-        row = QHBoxLayout()
 
-        # Buttons
-        self.play_btn = QPushButton("▶ Start Recording")
-        self.stop_btn = QPushButton("⏹ Stop Recording")
-        self.chat_btn = QPushButton("💬")
-        self.menu_btn = QPushButton("⚙")
-
-        button_style = (
-            """
+        # Single unified button
+        self.main_btn = QPushButton("🤖")
+        self.main_btn.setFixedSize(56, 56)
+        
+        button_style = """
             QPushButton {
-                background-color: rgba(50, 50, 50, 180);
+                background-color: rgba(50, 50, 50, 200);
                 color: white;
-                border-radius: 12px;
-                padding: 8px 16px;
-                font-size: 14px;
+                border-radius: 28px;
+                font-size: 28px;
+                border: 2px solid rgba(255, 255, 255, 0.1);
             }
             QPushButton:hover {
-                background-color: rgba(80, 80, 80, 200);
+                background-color: rgba(70, 70, 70, 220);
+                border: 2px solid rgba(255, 255, 255, 0.2);
             }
-            """
-        )
-        small_button_style = (
-            """
-            QPushButton {
-                background-color: rgba(50, 50, 50, 180);
-                color: white;
-                border-radius: 10px;
-                padding: 4px 8px;
-                font-size: 12px;
-                min-width: 24px;
-                max-width: 28px;
-            }
-            QPushButton:hover {
-                background-color: rgba(80, 80, 80, 200);
-            }
-            """
-        )
-        self.play_btn.setStyleSheet(button_style)
-        self.stop_btn.setStyleSheet(button_style)
-        self.chat_btn.setStyleSheet(small_button_style)
-        self.menu_btn.setStyleSheet(small_button_style)
-
-        # Row contents
-        row.addWidget(self.play_btn)
-        row.addWidget(self.stop_btn)
-        row.addWidget(self.chat_btn)
-        row.addWidget(self.menu_btn)
-        layout.addLayout(row)
-
-        # Initially only Play visible
-        self.stop_btn.hide()
-
-        # Button actions
-        self.play_btn.clicked.connect(self.start_recording)
-        self.stop_btn.clicked.connect(self.stop_recording)
-        self.chat_btn.clicked.connect(self.toggle_chat_window)
-        self.menu_btn.clicked.connect(self.show_menu)
+        """
+        self.main_btn.setStyleSheet(button_style)
+        
+        # Install event filter for custom mouse handling
+        self.main_btn.installEventFilter(self)
+        
+        layout.addWidget(self.main_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Dragging state
-        self.drag_position = None  # used by top-level mouse* overrides
-        self._drag_offset = None  # used by eventFilter for child widgets
+        self.drag_position = None
+        self._drag_offset = None
         self._dragging = False
         self._press_global_pos = None
-
-        # Allow dragging when starting on buttons too
-        self.play_btn.installEventFilter(self)
-        self.stop_btn.installEventFilter(self)
-        self.chat_btn.installEventFilter(self)
-        self.menu_btn.installEventFilter(self)
 
         # Default position (bottom right)
         screen = QApplication.primaryScreen().availableGeometry()
@@ -708,53 +682,106 @@ class Gadget(QWidget):
     def mouseReleaseEvent(self, event):
         self.drag_position = None
 
-    # Let dragging start from child widgets (e.g., buttons) without breaking clicks
     def eventFilter(self, obj, event):
-        # Only care about mouse events on our child widgets
-        if obj in (self.menu_btn, self.play_btn, self.stop_btn, self.chat_btn):
-            if (
-                event.type() == QEvent.Type.MouseButtonPress
-                and event.button() == Qt.MouseButton.LeftButton
-            ):
+        # Handle main button events
+        if obj == self.main_btn:
+            # Left button press - start timer for long press
+            if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 self._press_global_pos = event.globalPosition().toPoint()
-                self._drag_offset = (
-                    self._press_global_pos - self.frameGeometry().topLeft()
-                )
+                self._drag_offset = self._press_global_pos - self.frameGeometry().topLeft()
                 self._dragging = False
-                # Don't consume; allow normal press behavior
+                self.press_start_time = time.time()
+                
+                # Start long press timer only if not recording
+                if not self.is_recording:
+                    self.long_press_timer.start(self.long_press_threshold)
+                
                 return False
-
-            if (
-                event.type() == QEvent.Type.MouseMove
-                and (event.buttons() & Qt.MouseButton.LeftButton)
-            ):
+            
+            # Right button press - show menu
+            elif event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.RightButton:
+                self.show_menu()
+                return True
+            
+            # Mouse move - handle dragging
+            elif event.type() == QEvent.Type.MouseMove and (event.buttons() & Qt.MouseButton.LeftButton):
                 if self._press_global_pos is not None:
                     current = event.globalPosition().toPoint()
-                    # Use Qt's standard threshold to decide between click and drag
                     if not self._dragging:
-                        if (
-                            current - self._press_global_pos
-                        ).manhattanLength() >= QApplication.startDragDistance():
+                        if (current - self._press_global_pos).manhattanLength() >= QApplication.startDragDistance():
                             self._dragging = True
+                            # Cancel long press if we start dragging
+                            self.long_press_timer.stop()
+                            # Reset ready to record state
+                            if self.ready_to_record:
+                                self.ready_to_record = False
+                                self.main_btn.setText("🤖")
+                    
                     if self._dragging and self._drag_offset is not None:
                         self.move(current - self._drag_offset)
-                        # Consume move while dragging so the button doesn't also handle it
                         return True
                 return False
-
-            if (
-                event.type() == QEvent.Type.MouseButtonRelease
-                and event.button() == Qt.MouseButton.LeftButton
-            ):
-                # If a drag occurred, eat the release so button click won't fire
+            
+            # Left button release - handle click, start recording, or stop recording
+            elif event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+                self.long_press_timer.stop()
                 was_dragging = self._dragging
                 self._press_global_pos = None
                 self._drag_offset = None
                 self._dragging = False
+                
+                if not was_dragging:
+                    if self.is_recording:
+                        # Stop recording
+                        self.stop_recording()
+                    elif self.ready_to_record:
+                        # User held long enough and now released - start recording
+                        self.ready_to_record = False
+                        self.start_recording()
+                    else:
+                        # Short click - toggle chat if it wasn't held long enough
+                        if self.press_start_time and (time.time() - self.press_start_time) < (self.long_press_threshold / 1000.0):
+                            self.toggle_chat_window()
+                
+                self.press_start_time = None
                 return True if was_dragging else False
 
         return super().eventFilter(obj, event)
 
+    def on_long_press(self):
+        """Called when button is held for long press threshold - show ready to record indicator."""
+        if not self.is_recording and not self._dragging:
+            self.ready_to_record = True
+            # Change icon to indicate ready to record (but don't start yet)
+            self.main_btn.setText("🎙️")
+    
+    def animate_recording(self):
+        """Smooth pulsing animation with opacity and scale effect."""
+        # Create a smooth sine-wave based pulsing effect
+        self.animation_step += self.animation_direction
+        
+        # Reverse direction at boundaries for smooth back-and-forth
+        if self.animation_step >= 20:
+            self.animation_direction = -1
+        elif self.animation_step <= 0:
+            self.animation_direction = 1
+        
+        # Calculate opacity (0.4 to 1.0) and scale factor
+        progress = self.animation_step / 20.0
+        opacity = 0.4 + (0.6 * progress)
+        
+        # Apply smooth pulsing style with border glow effect
+        self.main_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: rgba(220, 50, 50, {opacity});
+                color: white;
+                border-radius: 28px;
+                font-size: 28px;
+                border: 2px solid rgba(255, 100, 100, {min(1.0, opacity + 0.3)});
+                box-shadow: 0 0 {int(15 * progress)}px rgba(255, 50, 50, {opacity});
+            }}
+        """)
+    
     def show_menu(self):
         menu = QMenu(self)
 
@@ -789,8 +816,8 @@ class Gadget(QWidget):
         close_action.triggered.connect(self.quit_app)
         menu.addAction(close_action)
 
-        # Show menu below the menu button
-        menu.exec(self.menu_btn.mapToGlobal(self.menu_btn.rect().bottomLeft()))
+        # Show menu below the main button
+        menu.exec(self.main_btn.mapToGlobal(self.main_btn.rect().bottomLeft()))
 
     def _set_language(self, code: str):
         allowed = {"en", "ro", "ru", "de", "fr", "es"}
@@ -1186,11 +1213,32 @@ class Gadget(QWidget):
         )
         self.stream.start()
 
-        self.play_btn.hide()
-        self.stop_btn.show()
+        # Start recording animation - smooth pulsing effect
+        self.animation_step = 0
+        self.animation_direction = 1
+        self.main_btn.setText("🔴")
+        self.recording_animation_timer.start(50)  # 50ms for smooth animation (20 fps)
 
     def stop_recording(self):
         self.is_recording = False
+        
+        # Stop animation and restore icon with original style
+        self.recording_animation_timer.stop()
+        self.main_btn.setText("🤖")
+        self.main_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(50, 50, 50, 200);
+                color: white;
+                border-radius: 28px;
+                font-size: 28px;
+                border: 2px solid rgba(255, 255, 255, 0.1);
+            }
+            QPushButton:hover {
+                background-color: rgba(70, 70, 70, 220);
+                border: 2px solid rgba(255, 255, 255, 0.2);
+            }
+        """)
+        
         t0 = time.perf_counter()
         if hasattr(self, "stream") and getattr(self, "stream") is not None:
             try:
@@ -1235,10 +1283,13 @@ class Gadget(QWidget):
                     " server_ms=", server_ms,
                 )
                 
-                # If transcription successful and chat window is visible, send to agent
+                # If transcription successful, open chat if not visible and send to agent
                 if isinstance(data, dict) and "text" in data:
                     transcribed_text = data["text"]
-                    if transcribed_text and self.chat_window and self.chat_window.isVisible():
+                    if transcribed_text:
+                        # Open chat window if not visible
+                        if not self.chat_window or not self.chat_window.isVisible():
+                            self.toggle_chat_window()
                         # Use signal to call send_to_agent on main thread
                         self.transcription_received.emit(transcribed_text)
                 
@@ -1246,9 +1297,6 @@ class Gadget(QWidget):
                 print("Upload failed:", e)
 
         threading.Thread(target=_send, daemon=True).start()
-
-        self.stop_btn.hide()
-        self.play_btn.show()
 
 
 if __name__ == "__main__":
