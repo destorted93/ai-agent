@@ -173,6 +173,12 @@ class ChatWindow(QWidget):
         self.setAcceptDrops(True)
         self.dropped_files = []
         
+        # Sending state tracking
+        self.is_sending = False
+        self.send_animation_timer = QTimer()
+        self.send_animation_timer.timeout.connect(self.animate_sending)
+        self.send_animation_step = 0
+        
         # Chat display area
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -276,8 +282,25 @@ class ChatWindow(QWidget):
         self.input_field = MultilineInput()
         self.input_field.send_message.connect(self.send_message)
         
-        self.send_button = QPushButton("Send")
-        self.send_button.clicked.connect(self.send_message)
+        self.send_button = QPushButton("➤")
+        self.send_button.setFixedSize(40, 40)
+        self.send_button.clicked.connect(self.handle_send_button_click)
+        self.send_button.setStyleSheet("""
+            QPushButton {
+                background-color: #0e639c;
+                color: white;
+                border: none;
+                border-radius: 20px;
+                font-size: 18px;
+            }
+            QPushButton:hover {
+                background-color: #1177bb;
+            }
+            QPushButton:disabled {
+                background-color: #444444;
+                color: #888888;
+            }
+        """)
         
         input_layout.addWidget(self.input_field)
         input_layout.addWidget(self.send_button, alignment=Qt.AlignmentFlag.AlignBottom)
@@ -416,6 +439,13 @@ class ChatWindow(QWidget):
         if scroll:
             scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
     
+    def handle_send_button_click(self):
+        """Handle send button click - either send message or stop inference."""
+        if self.is_sending:
+            self.stop_inference()
+        else:
+            self.send_message()
+    
     def send_message(self):
         """Send message from input field."""
         text = self.input_field.toPlainText().strip()
@@ -430,9 +460,69 @@ class ChatWindow(QWidget):
         if text and self.parent_widget:
             self.input_field.clear_text()
             self.clear_attached_files()
+            self.start_sending_state()
             self.parent_widget.send_to_agent(text)
             # Scroll with longer delay to ensure user message is fully rendered
             QTimer.singleShot(100, self._do_scroll)
+    
+    def start_sending_state(self):
+        """Start the sending animation state."""
+        self.is_sending = True
+        self.send_animation_step = 0
+        self.send_button.setText("⠋")  # Clean spinner
+        self.send_animation_timer.start(100)  # Update every 100ms (same as recording)
+        self.input_field.setEnabled(False)
+    
+    def stop_sending_state(self):
+        """Stop the sending animation and return to normal state."""
+        self.is_sending = False
+        self.send_animation_timer.stop()
+        self.send_button.setText("➤")
+        self.send_button.setStyleSheet("""
+            QPushButton {
+                background-color: #0e639c;
+                color: white;
+                border: none;
+                border-radius: 20px;
+                font-size: 18px;
+            }
+            QPushButton:hover {
+                background-color: #1177bb;
+            }
+            QPushButton:disabled {
+                background-color: #444444;
+                color: #888888;
+            }
+        """)
+        self.input_field.setEnabled(True)
+    
+    def animate_sending(self):
+        """Clean rotating spinner animation - same as recording."""
+        self.send_animation_step = (self.send_animation_step + 1) % 8
+        
+        # Standard Unicode spinner
+        spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"]
+        
+        self.send_button.setText(spinner_chars[self.send_animation_step])
+        self.send_button.setStyleSheet("""
+            QPushButton {
+                background-color: #c83232;
+                color: white;
+                border: none;
+                border-radius: 20px;
+                font-size: 18px;
+            }
+            QPushButton:hover {
+                background-color: #d84444;
+            }
+        """)
+    
+    def stop_inference(self):
+        """Stop the AI inference (placeholder for future implementation)."""
+        # TODO: Implement actual inference cancellation
+        # This should send a cancellation request to the agent service
+        print("Stop inference requested - not yet implemented")
+        self.stop_sending_state()
     
     def request_clear_chat(self):
         """Request parent to clear chat (both locally and on server) with confirmation."""
@@ -605,7 +695,6 @@ class Gadget(QWidget):
         self.recording_animation_timer = QTimer()
         self.recording_animation_timer.timeout.connect(self.animate_recording)
         self.animation_step = 0
-        self.animation_direction = 1  # 1 for growing, -1 for shrinking
         
         # Chat window
         self.chat_window = None
@@ -756,31 +845,22 @@ class Gadget(QWidget):
             self.main_btn.setText("🎙️")
     
     def animate_recording(self):
-        """Smooth pulsing animation with opacity and scale effect."""
-        # Create a smooth sine-wave based pulsing effect
-        self.animation_step += self.animation_direction
+        """Clean rotating spinner animation."""
+        self.animation_step = (self.animation_step + 1) % 8
         
-        # Reverse direction at boundaries for smooth back-and-forth
-        if self.animation_step >= 20:
-            self.animation_direction = -1
-        elif self.animation_step <= 0:
-            self.animation_direction = 1
+        # Standard Unicode spinner
+        spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"]
         
-        # Calculate opacity (0.4 to 1.0) and scale factor
-        progress = self.animation_step / 20.0
-        opacity = 0.4 + (0.6 * progress)
-        
-        # Apply smooth pulsing style with border glow effect
-        self.main_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: rgba(220, 50, 50, {opacity});
-                color: white;
+        self.main_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(80, 80, 80, 200);
+                color: #ff4444;
                 border-radius: 28px;
                 font-size: 28px;
-                border: 2px solid rgba(255, 100, 100, {min(1.0, opacity + 0.3)});
-                box-shadow: 0 0 {int(15 * progress)}px rgba(255, 50, 50, {opacity});
-            }}
+                border: 2px solid rgba(255, 80, 80, 0.6);
+            }
         """)
+        self.main_btn.setText(spinner_chars[self.animation_step])
     
     def show_menu(self):
         menu = QMenu(self)
@@ -1138,12 +1218,16 @@ class Gadget(QWidget):
             elif event_type == "stream.finished":
                 # Custom event to finish AI response
                 self.chat_window.finish_ai_response()
+                # Stop sending animation
+                self.chat_window.stop_sending_state()
             
             elif event_type == "error":
                 # Custom error event
                 error_msg = event.get("message", "Unknown error")
                 self.chat_window.append_to_ai_response(f"\n[Error] {error_msg}\n", '31')
                 self.chat_window.finish_ai_response()
+                # Stop sending animation on error
+                self.chat_window.stop_sending_state()
         
         except Exception as e:
             print(f"Error in handle_agent_event: {e}")
@@ -1213,11 +1297,10 @@ class Gadget(QWidget):
         )
         self.stream.start()
 
-        # Start recording animation - smooth pulsing effect
+        # Start recording animation - clean spinner
         self.animation_step = 0
-        self.animation_direction = 1
-        self.main_btn.setText("🔴")
-        self.recording_animation_timer.start(50)  # 50ms for smooth animation (20 fps)
+        self.main_btn.setText("⠋")
+        self.recording_animation_timer.start(100)  # 100ms for smooth rotation
 
     def stop_recording(self):
         self.is_recording = False
