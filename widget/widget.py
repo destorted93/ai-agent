@@ -1816,7 +1816,7 @@ class Gadget(QWidget):
             self.stream = None
         t1 = time.perf_counter()
 
-        # Build WAV in-memory and send to the transcribe microservice in background
+        # Build WAV in-memory and send to the transcribe service in background
         def _send():
             try:
                 buf = io.BytesIO()

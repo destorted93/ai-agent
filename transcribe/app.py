@@ -105,6 +105,6 @@ async def upload_and_transcribe(
 
 
 if __name__ == "__main__":
-    # Bind to all interfaces by default for microservice usage
+    # Bind to all interfaces by default for service usage
     port = int(os.environ.get("PORT", settings.PORT))
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")

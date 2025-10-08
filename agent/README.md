@@ -36,8 +36,8 @@ Configuration for:
 from agent import Agent, AgentConfig
 
 config = AgentConfig(
-    model="gpt-4o",
-    temperature=0.7
+    model="gpt-5",
+    temperature=1.0
 )
 
 agent = Agent(

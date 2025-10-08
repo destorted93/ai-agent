@@ -1,5 +1,7 @@
 # AI Agent
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Desktop AI assistant with voice input, chat interface, and powerful tools.
 
 ## 🚀 Quick Start
@@ -15,14 +17,14 @@ Everything runs in the background - no terminal windows! The widget appears on y
 
 A modular AI agent that:
 - Listens to your voice and transcribes it
-- Chats with you using GPT-4
+- Chats with you using GPT-5
 - Executes tasks through tools
 - Remembers context across sessions
 - Runs as separate services for stability
 
 ## Architecture
 
-**Microservices** - Each component runs independently:
+**Multi-service architecture** - Each component runs independently:
 
 ### Core Services
 - **agent-main/** - Main AI agent (CLI + API modes)
@@ -139,7 +141,7 @@ Each service has its own README with details:
 ## Project Layout
 
 ```
-ai-agent/
+ai-agent-desktop/
 ├── INSTALL.bat         # Install all dependencies
 ├── START_CLEAN.bat     # Launch everything (background, no terminals)
 ├── START.bat           # Launch with visible terminals
@@ -153,7 +155,7 @@ ai-agent/
 └── service-template/   # New service boilerplate
 ```
 
-## Why Microservices?
+## Why Multi-Service Architecture?
 
 - **Isolation**: One crash doesn't kill everything
 - **Resources**: Distribute load across processes
@@ -223,3 +225,21 @@ When services are running, access interactive API docs:
 - Voice recording with transcription
 - Chat window with persistent history
 - Draggable, customizable position
+
+## Contributing
+
+Contributions are welcome! Feel free to:
+- Report bugs or issues
+- Suggest new features
+- Submit pull requests
+- Improve documentation
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Author
+
+**destorted93**
+- GitHub: [@destorted93](https://github.com/destorted93)
+- Repository: [ai-agent-desktop](https://github.com/destorted93/ai-agent-desktop)

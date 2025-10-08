@@ -1,6 +1,6 @@
 # Service Template
 
-Boilerplate for creating new FastAPI microservices.
+Boilerplate for creating new FastAPI services.
 
 ## What it includes
 
@@ -25,7 +25,7 @@ service-name/
 ├── app.py              # Main FastAPI application
 ├── config.py           # Configuration settings
 ├── requirements.txt    # Python dependencies
-└── README.md          # Service documentation
+└── README.md           # Service documentation
 ```
 
 ## Running
