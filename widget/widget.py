@@ -638,12 +638,16 @@ class ChatWindow(QWidget):
             QTimer.singleShot(100, self._do_scroll)
     
     def start_sending_state(self):
-        """Start the sending animation state."""
+        """Start the sending animation state and disable UI interactions."""
         self.is_sending = True
         self.send_animation_step = 0
         self.send_button.setText("⠋")  # Clean spinner
         self.send_animation_timer.start(100)  # Update every 100ms (same as recording)
+        
+        # Disable input and buttons
         self.input_field.setEnabled(False)
+        self.screenshot_button.setEnabled(False)
+        self.clear_button.setEnabled(False)
     
     def stop_sending_state(self):
         """Stop the sending animation and return to normal state."""
@@ -666,7 +670,11 @@ class ChatWindow(QWidget):
                 color: #888888;
             }
         """)
+        
+        # Re-enable input and buttons
         self.input_field.setEnabled(True)
+        self.screenshot_button.setEnabled(True)
+        self.clear_button.setEnabled(True)
     
     def animate_sending(self):
         """Clean rotating spinner animation - same as recording."""
@@ -847,8 +855,10 @@ class ChatWindow(QWidget):
             import base64
             from io import BytesIO
             
-            # Hide the chat window temporarily
+            # Hide the chat window AND parent widget temporarily
             self.hide()
+            if self.parent_widget:
+                self.parent_widget.hide()
             QTimer.singleShot(300, self._perform_screenshot)
             
         except Exception as e:
@@ -892,7 +902,9 @@ class ChatWindow(QWidget):
             import base64
             from PyQt6.QtCore import QBuffer, QIODevice
             
-            # Show window again
+            # Show windows again
+            if self.parent_widget:
+                self.parent_widget.show()
             self.show()
             self.raise_()
             self.activateWindow()
@@ -922,6 +934,8 @@ class ChatWindow(QWidget):
     
     def _handle_screenshot_cancelled(self):
         """Handle screenshot cancellation."""
+        if self.parent_widget:
+            self.parent_widget.show()
         self.show()
         self.raise_()
         self.activateWindow()
@@ -1145,6 +1159,9 @@ class Gadget(QWidget):
     def eventFilter(self, obj, event):
         # Handle main button events
         if obj == self.main_btn:
+            # Check if chat window is sending - block most interactions
+            is_chat_sending = self.chat_window and self.chat_window.is_sending
+            
             # Left button press - start timer for long press
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 self._press_global_pos = event.globalPosition().toPoint()
@@ -1152,15 +1169,16 @@ class Gadget(QWidget):
                 self._dragging = False
                 self.press_start_time = time.time()
                 
-                # Start long press timer only if not recording
-                if not self.is_recording:
+                # Start long press timer only if not recording and not sending
+                if not self.is_recording and not is_chat_sending:
                     self.long_press_timer.start(self.long_press_threshold)
                 
                 return False
             
-            # Right button press - show menu
+            # Right button press - show menu (blocked during sending)
             elif event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.RightButton:
-                self.show_menu()
+                if not is_chat_sending:
+                    self.show_menu()
                 return True
             
             # Mouse move - handle dragging
