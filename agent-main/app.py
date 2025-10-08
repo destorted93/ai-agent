@@ -309,11 +309,21 @@ def run_service(port=None):
         """WebSocket endpoint for streaming chat with chunked screenshot support."""
         await websocket.accept()
         
+        # Track if we're currently processing a request
+        processing = False
+        
         try:
             while True:
                 # Receive initial message from client
                 data = await websocket.receive_json()
                 msg_type = data.get("type", "message")
+                
+                # Handle stop request
+                if msg_type == "stop":
+                    if processing:
+                        agent.stop()
+                        await websocket.send_json({"type": "stop.acknowledged"})
+                    continue
                 
                 # Handle different message types
                 if msg_type == "message":
@@ -342,6 +352,7 @@ def run_service(port=None):
                         continue
                     
                     try:
+                        processing = True
                         # Process the message and stream events
                         # Use asyncio to avoid blocking the event loop
                         stream = process_message(message, screenshots_b64, max_turns)
@@ -360,8 +371,10 @@ def run_service(port=None):
                         
                         # Send completion signal
                         await websocket.send_json({"type": "stream.finished"})
+                        processing = False
                         
                     except Exception as e:
+                        processing = False
                         print(f"Error processing message: {e}")
                         import traceback
                         traceback.print_exc()

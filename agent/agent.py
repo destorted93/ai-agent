@@ -36,6 +36,7 @@ class Agent:
         self.turn = 1
         self.chat_history_during_run = []  # per-run ephemeral history additions
         self.generated_images = []
+        self._stop_requested = False  # Flag to stop the current run
 
         if not self.user_id or not isinstance(self.user_id, str):
             raise ValueError("user_id must be a non-empty string.")
@@ -44,11 +45,16 @@ class Agent:
         # Windows PowerShell supports ANSI escape codes in recent versions
         return f"\033[{color_code}m{text}\033[0m"
 
+    def stop(self):
+        """Request to stop the current agent run."""
+        self._stop_requested = True
+
     def run(self, message=None, input_messages=None, max_turns=16, screenshots_b64=None):
         self.chat_history_during_run = []
         self.function_call_detected = False
         self.turn = 1
         self._run_start_time = datetime.now()
+        self._stop_requested = False  # Reset stop flag at the start of each run
 
         # if messages or message None or is not string or is empty, return None
         if input_messages is None or (message is None and screenshots_b64 is None) or (message is not None and not isinstance(message, str)):
@@ -63,6 +69,18 @@ class Agent:
 
         # start the Agent loop
         while True:
+            # Check if stop was requested
+            if self._stop_requested:
+                yield {
+                    "type": "response.agent.done",
+                    "message": "Agent run stopped by user request.",
+                    "duration_seconds": (datetime.now() - self._run_start_time).total_seconds(),
+                    "chat_history": self.chat_history_during_run,
+                    "generated_images": self.generated_images,
+                    "stopped": True
+                }
+                return
+            
             # Guard against runaway loops (SDK would raise MaxTurnsExceeded)
             if self.turn > max_turns:
                 yield {
@@ -140,6 +158,18 @@ class Agent:
                     # service_tier="priority"
                 )
                 for event in events:
+                    # Check for stop request before processing each event
+                    if self._stop_requested:
+                        yield {
+                            "type": "response.agent.done",
+                            "message": "Agent run stopped by user request.",
+                            "duration_seconds": (datetime.now() - self._run_start_time).total_seconds(),
+                            "chat_history": self.chat_history_during_run,
+                            "generated_images": self.generated_images,
+                            "stopped": True
+                        }
+                        return
+                    
                     if event.type == "response.reasoning_summary_part.added":
                         yield {"type": "response.reasoning_summary_part.added"}
                     elif event.type == "response.reasoning_summary_text.delta":

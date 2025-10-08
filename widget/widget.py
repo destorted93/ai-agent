@@ -628,7 +628,6 @@ class ChatWindow(QWidget):
         if (text or self.screenshots) and self.parent_widget:
             self.input_field.clear_text()
             self.clear_attached_files()
-            self.start_sending_state()
             # Pass text and list of screenshot data
             screenshot_data_list = [s["data"] for s in self.screenshots]
             self.parent_widget.send_to_agent(text, screenshot_data_list)
@@ -698,10 +697,10 @@ class ChatWindow(QWidget):
         """)
     
     def stop_inference(self):
-        """Stop the AI inference (placeholder for future implementation)."""
-        # TODO: Implement actual inference cancellation
-        # This should send a cancellation request to the agent service
-        print("Stop inference requested - not yet implemented")
+        """Stop the AI inference by notifying parent widget."""
+        print("Stop inference requested")
+        if self.parent_widget:
+            self.parent_widget.stop_agent_inference()
         self.stop_sending_state()
     
     def request_clear_chat(self):
@@ -1085,6 +1084,10 @@ class Gadget(QWidget):
         self.chat_window = None
         self.agent_url = os.environ.get("AGENT_URL", "http://127.0.0.1:6002")
         
+        # WebSocket tracking for cancellation
+        self.current_websocket = None
+        self.stop_requested = False
+        
         # Connect signals to slots for thread-safe UI updates
         self.history_loaded.connect(self.display_chat_history)
         self.agent_event_received.connect(self.handle_agent_event)
@@ -1465,6 +1468,31 @@ class Gadget(QWidget):
         
         threading.Thread(target=_clear_on_server, daemon=True).start()
     
+    def stop_agent_inference(self):
+        """Stop the current agent inference."""
+        self.stop_requested = True
+        if self.current_websocket:
+            # Send stop message through websocket
+            def _send_stop():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(self._send_stop_signal())
+                    loop.close()
+                except Exception as e:
+                    print(f"Failed to send stop signal: {e}")
+            
+            threading.Thread(target=_send_stop, daemon=True).start()
+    
+    async def _send_stop_signal(self):
+        """Send stop signal through the current websocket."""
+        if self.current_websocket:
+            try:
+                await self.current_websocket.send(json.dumps({"type": "stop"}))
+                print("Stop signal sent to agent")
+            except Exception as e:
+                print(f"Error sending stop signal: {e}")
+    
     def send_to_agent(self, text, screenshots_data=None):
         """Send text and optional screenshots to the agent service and handle streaming response via WebSocket."""
         if not self.chat_window:
@@ -1482,6 +1510,9 @@ class Gadget(QWidget):
         # Add user message to chat (with file context if any)
         display_text = text if text else f"[{len(screenshots_data) if screenshots_data else 0} Screenshot(s)]"
         self.chat_window.add_user_message(display_text)
+        
+        # Start sending state (shows stop button)
+        self.chat_window.start_sending_state()
         
         # Start AI response
         self.chat_window.start_ai_response()
@@ -1512,6 +1543,9 @@ class Gadget(QWidget):
         ws_url = self.agent_url.replace("http://", "ws://").replace("https://", "wss://")
         ws_url = f"{ws_url}/chat/ws"
         
+        # Reset stop flag
+        self.stop_requested = False
+        
         try:
             # Increase timeouts and max message size for screenshots
             async with websockets.connect(
@@ -1520,6 +1554,8 @@ class Gadget(QWidget):
                 close_timeout=10,
                 max_size=10 * 1024 * 1024  # 10MB max message size
             ) as websocket:
+                # Track the current websocket for cancellation
+                self.current_websocket = websocket
                 # Send initial message WITHOUT screenshots
                 payload = {
                     "type": "message",
@@ -1547,10 +1583,26 @@ class Gadget(QWidget):
                 # Receive streaming events
                 async for message in websocket:
                     try:
+                        # Check if stop was requested
+                        if self.stop_requested:
+                            print("Stop requested, breaking event loop")
+                            break
+                        
                         event = json.loads(message)
+                        
+                        # Check for stop acknowledgment
+                        if event.get("type") == "stop.acknowledged":
+                            print("Stop acknowledged by server")
+                            continue
                         
                         # Check for completion
                         if event.get("type") == "stream.finished":
+                            self.agent_event_received.emit(event)
+                            break
+                        
+                        # Check if agent was stopped
+                        if event.get("type") == "response.agent.done" and event.get("stopped"):
+                            print("Agent stopped by user request")
                             self.agent_event_received.emit(event)
                             break
                         
@@ -1570,6 +1622,10 @@ class Gadget(QWidget):
             print(f"Error in websocket stream: {e}")
             traceback.print_exc()
             raise
+        finally:
+            # Clear the websocket reference
+            self.current_websocket = None
+            self.stop_requested = False
     
     @pyqtSlot(dict)
     def handle_agent_event(self, event):
@@ -1632,8 +1688,12 @@ class Gadget(QWidget):
                 pass
             
             elif event_type == "response.agent.done":
-                # Skip displaying agent done message - not needed in chat UI
-                pass
+                # Check if it was stopped by user
+                if event.get("stopped"):
+                    self.chat_window.append_to_ai_response("\n[Stopped by user]\n", '31')
+                    self.chat_window.finish_ai_response()
+                    self.chat_window.stop_sending_state()
+                # Otherwise skip displaying agent done message - not needed in chat UI
             
             elif event_type == "stream.finished":
                 # Custom event to finish AI response
