@@ -4,12 +4,12 @@ Desktop AI assistant with voice input, chat interface, and powerful tools.
 
 ## 🚀 Quick Start
 
-**Double-click `START.bat`** to launch everything:
+**Double-click `START_CLEAN.bat`** to launch everything:
 - 🎤 Transcribe Service (voice-to-text)
 - 🤖 Agent Service (AI brain)
 - 💬 Widget (desktop interface)
 
-That's it! The widget appears on your desktop ready to use.
+Everything runs in the background - no terminal windows! The widget appears on your desktop ready to use.
 
 ## What it does
 
@@ -79,8 +79,22 @@ pip install -r widget/requirements.txt
 ## Running
 
 ### Complete System (Recommended)
+
+**1. Install dependencies first:**
 ```bash
-START.bat
+INSTALL.bat
+```
+
+**2. Launch the agent:**
+```bash
+START_CLEAN.bat  # Clean launch - runs in background, no terminals
+```
+
+This is the main way to use the agent. Just close the widget to stop everything.
+
+### Alternative Launchers
+```bash
+START.bat        # Shows terminal windows (useful for debugging)
 ```
 
 ### Individual Components
@@ -126,8 +140,9 @@ Each service has its own README with details:
 
 ```
 ai-agent/
-├── START.bat           # Launch everything
-├── INSTALL.bat         # Install dependencies
+├── INSTALL.bat         # Install all dependencies
+├── START_CLEAN.bat     # Launch everything (background, no terminals)
+├── START.bat           # Launch with visible terminals
 ├── agent-main/         # Main AI agent
 ├── agent/              # Core agent logic
 ├── transcribe/         # Voice-to-text service
