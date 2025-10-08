@@ -1,11 +1,12 @@
 import os
 import json
 from datetime import datetime
+from typing import Optional
 from openai import OpenAI
 from .config import AgentConfig
 
 class Agent:
-    def __init__(self, name, tools, user_id=None, config: AgentConfig | None = None):
+    def __init__(self, name, tools, user_id=None, config: Optional[AgentConfig] = None):
         """AI Agent wrapper.
 
         Parameters:
