@@ -135,25 +135,19 @@ def initialize_agent(load_history=True):
     )
 
 
-def process_message(user_input_text, max_turns=None):
+def process_message(user_input_text, screenshots_b64=None, max_turns=None):
     """Process a message and return the event stream."""
     if max_turns is None:
         max_turns = config.MAX_TURNS
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     formatted_input = f"> **Timestamp:** `{timestamp}`\nUser's input: {user_input_text}"
     
-    # user_message = {
-    #     "role": "user",
-    #     "content": [{"type": "input_text", "text": formatted_input}]
-    # }
-    
-    # chat_history_manager.add_entry(user_message)
-    
-    # Start the agent run
+    # Start the agent run with text and optional screenshots
     stream = agent.run(
         message=formatted_input,
         input_messages=chat_history_manager.get_history(),
         max_turns=max_turns,
+        screenshots_b64=screenshots_b64,  # Pass list of screenshots to agent
     )
     
     return stream
@@ -312,49 +306,70 @@ def run_service(port=None):
     
     @app.websocket("/chat/ws")
     async def chat_websocket(websocket: WebSocket):
-        """WebSocket endpoint for streaming chat."""
+        """WebSocket endpoint for streaming chat with chunked screenshot support."""
         await websocket.accept()
         
         try:
             while True:
-                # Receive message from client
+                # Receive initial message from client
                 data = await websocket.receive_json()
-                message = data.get("message", "")
-                max_turns = data.get("max_turns", config.MAX_TURNS)
+                msg_type = data.get("type", "message")
                 
-                if not message:
-                    await websocket.send_json({"type": "error", "message": "Empty message"})
-                    continue
-                
-                try:
-                    # Process the message and stream events
-                    # Use asyncio to avoid blocking the event loop
-                    stream = process_message(message, max_turns)
+                # Handle different message types
+                if msg_type == "message":
+                    message = data.get("message", "")
+                    has_screenshots = data.get("has_screenshots", False)
+                    screenshot_count = data.get("screenshot_count", 0)
+                    max_turns = data.get("max_turns", config.MAX_TURNS)
                     
-                    # Iterate through events and yield control to event loop
-                    for event in stream:
-                        # Handle the event (saves history, images, etc.)
-                        handle_event(event, interactive_mode=False)
+                    screenshots_b64 = []
+                    
+                    # If screenshots are coming, receive them
+                    if has_screenshots and screenshot_count > 0:
+                        for _ in range(screenshot_count):
+                            screenshot_msg = await websocket.receive_json()
+                            if screenshot_msg.get("type") == "screenshot":
+                                screenshots_b64.append(screenshot_msg.get("data"))
                         
-                        # Stream event to client
-                        serialized_event = make_serializable(event)
-                        await websocket.send_json(serialized_event)
+                        # Wait for completion signal
+                        complete_msg = await websocket.receive_json()
+                        if complete_msg.get("type") != "screenshots_complete":
+                            await websocket.send_json({"type": "error", "message": "Invalid screenshot sequence"})
+                            continue
+                    
+                    if not message and not screenshots_b64:
+                        await websocket.send_json({"type": "error", "message": "Empty message"})
+                        continue
+                    
+                    try:
+                        # Process the message and stream events
+                        # Use asyncio to avoid blocking the event loop
+                        stream = process_message(message, screenshots_b64, max_turns)
                         
-                        # Yield control to event loop to handle ping/pong
-                        await asyncio.sleep(0)
-                    
-                    # Send completion signal
-                    await websocket.send_json({"type": "stream.finished"})
-                    
-                except Exception as e:
-                    print(f"Error processing message: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": f"Error processing message: {str(e)}"
-                    })
-                    await websocket.send_json({"type": "stream.finished"})
+                        # Iterate through events and yield control to event loop
+                        for event in stream:
+                            # Handle the event (saves history, images, etc.)
+                            handle_event(event, interactive_mode=False)
+                            
+                            # Stream event to client
+                            serialized_event = make_serializable(event)
+                            await websocket.send_json(serialized_event)
+                            
+                            # Yield control to event loop to handle ping/pong
+                            await asyncio.sleep(0)
+                        
+                        # Send completion signal
+                        await websocket.send_json({"type": "stream.finished"})
+                        
+                    except Exception as e:
+                        print(f"Error processing message: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": f"Error processing message: {str(e)}"
+                        })
+                        await websocket.send_json({"type": "stream.finished"})
                     
         except WebSocketDisconnect:
             print("WebSocket client disconnected")

@@ -15,8 +15,104 @@ import traceback
 from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton, QVBoxLayout, 
                               QHBoxLayout, QMenu, QTextEdit, QLineEdit, QScrollArea,
                               QLabel, QFrame, QSizePolicy, QLayout)
-from PyQt6.QtGui import QAction, QTextCursor, QFont, QTextOption, QKeyEvent
+from PyQt6.QtGui import QAction, QTextCursor, QFont, QTextOption, QKeyEvent, QPainter, QColor, QPen, QPixmap
 from PyQt6.QtCore import Qt, QPoint, QEvent, pyqtSignal, QObject, QThread, pyqtSlot, QTimer, QRect, QSize
+
+
+class ScreenshotSelector(QWidget):
+    """Overlay widget for selecting a screen area."""
+    screenshot_selected = pyqtSignal(QPixmap)
+    screenshot_cancelled = pyqtSignal()
+    
+    def __init__(self, screenshot):
+        super().__init__()
+        self.screenshot = screenshot
+        self.start_pos = None
+        self.end_pos = None
+        self.selecting = False
+        
+        # Set up fullscreen transparent overlay
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        
+    def paintEvent(self, event):
+        """Draw the screenshot with selection overlay."""
+        painter = QPainter(self)
+        
+        # Draw the screenshot
+        painter.drawPixmap(0, 0, self.screenshot)
+        
+        # Draw semi-transparent overlay
+        overlay_color = QColor(0, 0, 0, 100)
+        painter.fillRect(self.rect(), overlay_color)
+        
+        # If selecting, draw the selection rectangle
+        if self.start_pos and self.end_pos:
+            selection_rect = QRect(self.start_pos, self.end_pos).normalized()
+            
+            # Clear the selection area (show original screenshot)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+            painter.fillRect(selection_rect, Qt.GlobalColor.transparent)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+            painter.drawPixmap(selection_rect, self.screenshot, selection_rect)
+            
+            # Draw selection border
+            pen = QPen(QColor(0, 150, 255), 2, Qt.PenStyle.SolidLine)
+            painter.setPen(pen)
+            painter.drawRect(selection_rect)
+            
+            # Draw dimensions text
+            painter.setPen(QColor(255, 255, 255))
+            painter.drawText(
+                selection_rect.x(),
+                selection_rect.y() - 5,
+                f"{selection_rect.width()}x{selection_rect.height()}"
+            )
+    
+    def mousePressEvent(self, event):
+        """Start selection."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.start_pos = event.pos()
+            self.end_pos = event.pos()
+            self.selecting = True
+            self.update()
+    
+    def mouseMoveEvent(self, event):
+        """Update selection."""
+        if self.selecting:
+            self.end_pos = event.pos()
+            self.update()
+    
+    def mouseReleaseEvent(self, event):
+        """Finish selection."""
+        if event.button() == Qt.MouseButton.LeftButton and self.selecting:
+            self.selecting = False
+            self.end_pos = event.pos()
+            
+            # Get the selected area
+            selection_rect = QRect(self.start_pos, self.end_pos).normalized()
+            
+            # Must have some minimum size
+            if selection_rect.width() > 10 and selection_rect.height() > 10:
+                selected_pixmap = self.screenshot.copy(selection_rect)
+                self.screenshot_selected.emit(selected_pixmap)
+                self.close()
+            else:
+                # Too small, cancel
+                self.screenshot_cancelled.emit()
+                self.close()
+    
+    def keyPressEvent(self, event):
+        """Cancel selection on Escape."""
+        if event.key() == Qt.Key.Key_Escape:
+            self.screenshot_cancelled.emit()
+            self.close()
 
 
 class MultilineInput(QTextEdit):
@@ -173,6 +269,10 @@ class ChatWindow(QWidget):
         self.setAcceptDrops(True)
         self.dropped_files = []
         
+        # Screenshot state - now supports multiple screenshots (max 5)
+        self.screenshots = []  # List of {"data": base64, "pixmap": QPixmap}
+        self.max_screenshots = 5
+        
         # Sending state tracking
         self.is_sending = False
         self.send_animation_timer = QTimer()
@@ -195,6 +295,27 @@ class ChatWindow(QWidget):
         toolbar_layout = QHBoxLayout(toolbar)
         toolbar_layout.setContentsMargins(10, 5, 10, 5)
         toolbar_layout.addStretch()
+        
+        self.screenshot_button = QPushButton("📸")
+        self.screenshot_button.setToolTip("Capture Screenshot")
+        self.screenshot_button.setFixedSize(32, 32)
+        self.screenshot_button.clicked.connect(self.capture_screenshot)
+        self.screenshot_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #888888 !important;
+                border: none;
+                border-radius: 5px;
+                font-size: 18px;
+                padding: 0px;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+                color: #4da6ff !important;
+            }
+        """)
+        
+        toolbar_layout.addWidget(self.screenshot_button)
         
         self.clear_button = QPushButton("🗑️")
         self.clear_button.setToolTip("Clear Chat History")
@@ -276,6 +397,52 @@ class ChatWindow(QWidget):
         
         attached_files_main_layout.addWidget(self.clear_all_btn)
         layout.addWidget(self.attached_files_widget)
+        
+        # Screenshots preview area (hidden by default)
+        self.screenshots_widget = QWidget()
+        self.screenshots_widget.hide()
+        screenshots_main_layout = QHBoxLayout(self.screenshots_widget)
+        screenshots_main_layout.setContentsMargins(5, 5, 5, 5)
+        screenshots_main_layout.setSpacing(5)
+        
+        # Container for screenshot thumbnails - uses flow layout
+        self.screenshots_container = QWidget()
+        self.screenshots_container.setStyleSheet("""
+            QWidget {
+                background-color: #2d2d2d;
+                border: 1px solid #3d3d3d;
+                border-radius: 5px;
+                padding: 5px;
+            }
+        """)
+        
+        # Use FlowLayout for wrapping
+        self.screenshots_layout = FlowLayout(self.screenshots_container, margin=5, spacing=5)
+        
+        screenshots_main_layout.addWidget(self.screenshots_container, 1)
+        
+        # Clear all screenshots button
+        self.clear_screenshots_btn = QPushButton("Clear All")
+        self.clear_screenshots_btn.setFixedHeight(24)
+        self.clear_screenshots_btn.setToolTip("Clear all screenshots")
+        self.clear_screenshots_btn.clicked.connect(self.clear_all_screenshots)
+        self.clear_screenshots_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3d3d3d;
+                color: #ff6b6b !important;
+                border: none;
+                border-radius: 3px;
+                font-size: 10px;
+                padding: 4px 10px;
+            }
+            QPushButton:hover {
+                background-color: #ff6b6b;
+                color: white !important;
+            }
+        """)
+        
+        screenshots_main_layout.addWidget(self.clear_screenshots_btn)
+        layout.addWidget(self.screenshots_widget)
         
         # Input area
         input_layout = QHBoxLayout()
@@ -457,11 +624,16 @@ class ChatWindow(QWidget):
                 file_context += f"- `{path}`\n"
             text = text + file_context if text else file_context.strip()
         
-        if text and self.parent_widget:
+        # Require either text or screenshots
+        if (text or self.screenshots) and self.parent_widget:
             self.input_field.clear_text()
             self.clear_attached_files()
             self.start_sending_state()
-            self.parent_widget.send_to_agent(text)
+            # Pass text and list of screenshot data
+            screenshot_data_list = [s["data"] for s in self.screenshots]
+            self.parent_widget.send_to_agent(text, screenshot_data_list)
+            # Clear screenshots after sending
+            self.clear_all_screenshots()
             # Scroll with longer delay to ensure user message is fully rendered
             QTimer.singleShot(100, self._do_scroll)
     
@@ -658,6 +830,205 @@ class ChatWindow(QWidget):
         """Clear all attached files."""
         self.dropped_files.clear()
         self.update_attached_files_display()
+    
+    def capture_screenshot(self):
+        """Capture a screenshot of the entire screen - user can crop later."""
+        # Check if max screenshots reached
+        if len(self.screenshots) >= self.max_screenshots:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Maximum Screenshots",
+                f"You can attach a maximum of {self.max_screenshots} screenshots per message."
+            )
+            return
+        
+        try:
+            import base64
+            from io import BytesIO
+            
+            # Hide the chat window temporarily
+            self.hide()
+            QTimer.singleShot(300, self._perform_screenshot)
+            
+        except Exception as e:
+            print(f"Screenshot error: {e}")
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Screenshot Error",
+                f"Failed to capture screenshot: {str(e)}"
+            )
+    
+    def _perform_screenshot(self):
+        """Actually perform the screenshot after window is hidden."""
+        try:
+            # Capture the entire screen using Qt
+            screen = QApplication.primaryScreen()
+            full_screenshot = screen.grabWindow(0)
+            
+            # Show selection overlay
+            from PyQt6.QtCore import QRect
+            self.selection_overlay = ScreenshotSelector(full_screenshot)
+            self.selection_overlay.screenshot_selected.connect(self._handle_screenshot_selection)
+            self.selection_overlay.screenshot_cancelled.connect(self._handle_screenshot_cancelled)
+            self.selection_overlay.showFullScreen()
+                
+        except Exception as e:
+            self.show()
+            print(f"Screenshot error: {e}")
+            import traceback
+            traceback.print_exc()
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Screenshot Error",
+                f"Failed to capture screenshot: {str(e)}"
+            )
+    
+    def _handle_screenshot_selection(self, selected_pixmap):
+        """Handle the selected screenshot area."""
+        try:
+            import base64
+            from PyQt6.QtCore import QBuffer, QIODevice
+            
+            # Show window again
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            
+            if selected_pixmap:
+                # Convert QPixmap to base64 using QBuffer
+                buffer = QBuffer()
+                buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                selected_pixmap.save(buffer, "PNG")
+                buffer.close()
+                
+                screenshot_data = base64.b64encode(buffer.data()).decode('utf-8')
+                
+                # Add to screenshots list
+                self.screenshots.append({
+                    "data": screenshot_data,
+                    "pixmap": selected_pixmap
+                })
+                
+                # Update display
+                self.update_screenshots_display()
+                
+        except Exception as e:
+            print(f"Screenshot processing error: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _handle_screenshot_cancelled(self):
+        """Handle screenshot cancellation."""
+        self.show()
+        self.raise_()
+        self.activateWindow()
+    
+    def update_screenshots_display(self):
+        """Update the display of screenshot thumbnails."""
+        # Clear existing thumbnails
+        while self.screenshots_layout.count():
+            item = self.screenshots_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        if self.screenshots:
+            # Create thumbnail for each screenshot
+            for idx, screenshot in enumerate(self.screenshots):
+                thumb_widget = QWidget()
+                thumb_layout = QVBoxLayout(thumb_widget)
+                thumb_layout.setContentsMargins(2, 2, 2, 2)
+                thumb_layout.setSpacing(2)
+                
+                # Thumbnail image (clickable)
+                thumb_label = QLabel()
+                thumb_pixmap = screenshot["pixmap"].scaled(
+                    80, 60,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                thumb_label.setPixmap(thumb_pixmap)
+                thumb_label.setStyleSheet("""
+                    QLabel {
+                        background-color: #2d2d2d;
+                        border: 2px solid #4da6ff;
+                        border-radius: 3px;
+                        padding: 2px;
+                    }
+                    QLabel:hover {
+                        border: 2px solid #66b3ff;
+                    }
+                """)
+                thumb_label.setCursor(Qt.CursorShape.PointingHandCursor)
+                thumb_label.mousePressEvent = lambda event, p=screenshot["pixmap"]: self.show_screenshot_fullsize(p)
+                
+                # Remove button
+                remove_btn = QPushButton("✖")
+                remove_btn.setFixedSize(16, 16)
+                remove_btn.setToolTip(f"Remove screenshot {idx + 1}")
+                remove_btn.clicked.connect(lambda checked, i=idx: self.remove_screenshot(i))
+                remove_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #ff6b6b;
+                        color: white !important;
+                        border: none;
+                        border-radius: 8px;
+                        font-size: 10px;
+                        padding: 0px;
+                    }
+                    QPushButton:hover {
+                        background-color: #ff5555;
+                    }
+                """)
+                
+                thumb_layout.addWidget(thumb_label, alignment=Qt.AlignmentFlag.AlignCenter)
+                thumb_layout.addWidget(remove_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+                
+                thumb_widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+                thumb_widget.adjustSize()
+                
+                self.screenshots_layout.addWidget(thumb_widget)
+            
+            self.screenshots_widget.show()
+        else:
+            self.screenshots_widget.hide()
+    
+    def show_screenshot_fullsize(self, pixmap):
+        """Show screenshot in a separate window at full size."""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QScrollArea
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Screenshot Preview")
+        dialog.setModal(False)
+        dialog.resize(800, 600)
+        
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        
+        label = QLabel()
+        label.setPixmap(pixmap)
+        label.setScaledContents(False)
+        
+        scroll.setWidget(label)
+        layout.addWidget(scroll)
+        
+        dialog.show()
+    
+    def remove_screenshot(self, index):
+        """Remove a specific screenshot."""
+        if 0 <= index < len(self.screenshots):
+            self.screenshots.pop(index)
+            self.update_screenshots_display()
+    
+    def clear_all_screenshots(self):
+        """Clear all screenshots."""
+        self.screenshots.clear()
+        self.update_screenshots_display()
     
     def closeEvent(self, event):
         """Override close to just hide the window."""
@@ -1076,13 +1447,23 @@ class Gadget(QWidget):
         
         threading.Thread(target=_clear_on_server, daemon=True).start()
     
-    def send_to_agent(self, text):
-        """Send text to the agent service and handle streaming response via WebSocket."""
+    def send_to_agent(self, text, screenshots_data=None):
+        """Send text and optional screenshots to the agent service and handle streaming response via WebSocket."""
         if not self.chat_window:
             return
         
-        # Add user message to chat
-        self.chat_window.add_user_message(text)
+        # Build message with file context if files are attached (same as manual send)
+        if self.chat_window.dropped_files:
+            file_context = "\n\n**Attached files/folders:**\n"
+            for path in self.chat_window.dropped_files:
+                file_context += f"- `{path}`\n"
+            text = text + file_context if text else file_context.strip()
+            # Clear attached files after including them
+            self.chat_window.clear_attached_files()
+        
+        # Add user message to chat (with file context if any)
+        display_text = text if text else f"[{len(screenshots_data) if screenshots_data else 0} Screenshot(s)]"
+        self.chat_window.add_user_message(display_text)
         
         # Start AI response
         self.chat_window.start_ai_response()
@@ -1093,7 +1474,7 @@ class Gadget(QWidget):
             asyncio.set_event_loop(loop)
             
             try:
-                loop.run_until_complete(self._websocket_stream(text))
+                loop.run_until_complete(self._websocket_stream(text, screenshots_data))
             except Exception as e:
                 print(f"Error in websocket stream: {e}")
                 traceback.print_exc()
@@ -1107,22 +1488,43 @@ class Gadget(QWidget):
         
         threading.Thread(target=_stream, daemon=True).start()
     
-    async def _websocket_stream(self, text):
-        """Handle WebSocket streaming communication."""
+    async def _websocket_stream(self, text, screenshots_data=None):
+        """Handle WebSocket streaming communication with chunked screenshot sending."""
         # Convert http:// to ws://
         ws_url = self.agent_url.replace("http://", "ws://").replace("https://", "wss://")
         ws_url = f"{ws_url}/chat/ws"
         
         try:
-            # Increase timeouts to handle long-running LLM operations
-            # ping_interval=None disables ping/pong to avoid timeout issues
+            # Increase timeouts and max message size for screenshots
             async with websockets.connect(
                 ws_url, 
                 ping_interval=None,  # Disable automatic ping/pong
-                close_timeout=10
+                close_timeout=10,
+                max_size=10 * 1024 * 1024  # 10MB max message size
             ) as websocket:
-                # Send message
-                await websocket.send(json.dumps({"message": text}))
+                # Send initial message WITHOUT screenshots
+                payload = {
+                    "type": "message",
+                    "message": text,
+                    "has_screenshots": bool(screenshots_data),
+                    "screenshot_count": len(screenshots_data) if screenshots_data else 0
+                }
+                await websocket.send(json.dumps(payload))
+                
+                # Send each screenshot as a separate message to avoid size limits
+                if screenshots_data:
+                    for idx, screenshot_b64 in enumerate(screenshots_data):
+                        screenshot_payload = {
+                            "type": "screenshot",
+                            "index": idx,
+                            "data": screenshot_b64
+                        }
+                        await websocket.send(json.dumps(screenshot_payload))
+                        # Small delay to ensure order
+                        await asyncio.sleep(0.01)
+                    
+                    # Signal all screenshots sent
+                    await websocket.send(json.dumps({"type": "screenshots_complete"}))
                 
                 # Receive streaming events
                 async for message in websocket:

@@ -43,14 +43,14 @@ class Agent:
         # Windows PowerShell supports ANSI escape codes in recent versions
         return f"\033[{color_code}m{text}\033[0m"
 
-    def run(self, message=None, input_messages=None, max_turns=16):
+    def run(self, message=None, input_messages=None, max_turns=16, screenshots_b64=None):
         self.chat_history_during_run = []
         self.function_call_detected = False
         self.turn = 1
         self._run_start_time = datetime.now()
 
         # if messages or message None or is not string or is empty, return None
-        if input_messages is None or message is None or not isinstance(message, str) or not message.strip():
+        if input_messages is None or (message is None and screenshots_b64 is None) or (message is not None and not isinstance(message, str)):
             yield {
                 "type": "response.agent.done",
                 "message": "No user input provided or input is invalid.",
@@ -83,9 +83,21 @@ class Agent:
                 }
                 return
             elif self.turn == 1:
+                # Build content array with text and optional screenshots
+                content = []
+                if message and message.strip():
+                    content.append({"type": "input_text", "text": message})
+                if screenshots_b64:
+                    # Add each screenshot as a separate input_image
+                    for screenshot_b64 in screenshots_b64:
+                        content.append({
+                            "type": "input_image",
+                            "image_url": f"data:image/png;base64,{screenshot_b64}",
+                        })
+                
                 user_message = {
                     "role": "user",
-                    "content": [{"type": "input_text", "text": message}]
+                    "content": content
                 }
                 self.chat_history_during_run = [user_message]
 
